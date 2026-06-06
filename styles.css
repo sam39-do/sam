@@ -1,0 +1,483 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #6fb7d7;
+  color: #1f2d35;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(255, 244, 185, 0.55), transparent 24rem),
+    radial-gradient(circle at 82% 18%, rgba(255, 255, 255, 0.42), transparent 18rem),
+    linear-gradient(180deg, #78c9ee 0%, #bfe9f4 48%, #a6d98f 100%);
+}
+
+button {
+  font: inherit;
+}
+
+.game-shell {
+  display: grid;
+  min-height: 100vh;
+  padding: clamp(10px, 2vw, 24px);
+  place-items: center;
+}
+
+.game-stage {
+  position: relative;
+  width: min(100%, 1500px, calc((100vh - 20px) * 3));
+  aspect-ratio: 3 / 1;
+  overflow: hidden;
+  border: 3px solid rgba(35, 69, 76, 0.28);
+  border-radius: 8px;
+  background: #9bdcf4;
+  box-shadow:
+    0 28px 90px rgba(29, 78, 94, 0.34),
+    inset 0 0 90px rgba(255, 255, 255, 0.18),
+    inset 0 -30px 60px rgba(29, 78, 94, 0.14);
+  transform: translateZ(0);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  image-rendering: auto;
+}
+
+.hud {
+  position: absolute;
+  top: clamp(10px, 2vw, 18px);
+  left: clamp(10px, 2vw, 18px);
+  display: flex;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.hud-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 64px;
+  height: clamp(30px, 5vw, 38px);
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 24px rgba(36, 74, 84, 0.16);
+  font-weight: 800;
+}
+
+.hud-icon {
+  color: #c61f39;
+}
+
+.start-panel {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: clamp(8px, 2vw, 22px);
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(135, 208, 237, 0.4), rgba(54, 111, 96, 0.3)),
+    rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(3px);
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease;
+}
+
+.start-panel.is-hidden {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.shop-panel {
+  position: absolute;
+  top: clamp(10px, 2vw, 18px);
+  left: clamp(10px, 2vw, 18px);
+  z-index: 4;
+  display: grid;
+  width: min(360px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  overflow: auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 32px rgba(36, 74, 84, 0.18);
+}
+
+.shop-panel.is-hidden {
+  display: none;
+}
+
+.shop-title,
+.shop-balance {
+  color: #23454c;
+  font-weight: 900;
+}
+
+.shop-balance {
+  color: #c6404f;
+}
+
+.shop-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.shop-preview {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+  background:
+    linear-gradient(90deg, transparent 38%, #d83b3f 38% 62%, transparent 62%),
+    linear-gradient(180deg, #eef3f8 0 36%, #17438d 36% 72%, #f0c64a 72% 100%);
+  box-shadow: inset 0 0 0 2px rgba(35, 69, 76, 0.18);
+}
+
+.shop-preview-homelander {
+  background:
+    radial-gradient(circle at 50% 34%, #f4d6ad 0 18%, transparent 19%),
+    linear-gradient(90deg, transparent 34%, #f4d34f 34% 66%, transparent 66%),
+    linear-gradient(180deg, #1f4f99 0 58%, #c92e37 58% 100%);
+}
+
+.shop-preview-momota {
+  background:
+    radial-gradient(circle at 50% 32%, #ead0aa 0 17%, transparent 18%),
+    linear-gradient(90deg, transparent 43%, #d8323f 43% 57%, transparent 57%),
+    linear-gradient(180deg, #111827 0 62%, #f7fafc 62% 72%, #111827 72% 100%);
+}
+
+.shop-section-title {
+  margin-top: 2px;
+  color: #23454c;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.shop-preview-starter,
+.shop-preview-victor,
+.shop-preview-arcsaber,
+.shop-preview-nanoflare,
+.shop-preview-anta {
+  background:
+    radial-gradient(ellipse at 58% 22%, transparent 0 26%, #26345f 27% 34%, transparent 35%),
+    linear-gradient(135deg, transparent 0 43%, #26345f 44% 49%, transparent 50%),
+    linear-gradient(180deg, #f7fbff 0 100%);
+}
+
+.shop-preview-starter {
+  background-color: #eefbff;
+  box-shadow:
+    inset 0 0 0 2px rgba(47, 35, 88, 0.16),
+    inset 0 0 0 8px rgba(76, 196, 220, 0.18);
+}
+
+.shop-preview-victor {
+  background:
+    radial-gradient(ellipse at 62% 22%, transparent 0 23%, #6bd6a0 24% 31%, transparent 32%),
+    radial-gradient(ellipse at 62% 22%, rgba(107, 214, 160, 0.22) 0 42%, transparent 43%),
+    linear-gradient(135deg, transparent 0 39%, #6bd6a0 40% 45%, #e8fff5 46% 48%, #16392f 49% 54%, transparent 55%),
+    radial-gradient(circle at 28% 72%, rgba(107, 214, 160, 0.28) 0 18%, transparent 19%),
+    linear-gradient(180deg, #07130e 0 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(107, 214, 160, 0.54),
+    inset 0 0 0 8px rgba(107, 214, 160, 0.18),
+    inset 0 0 24px rgba(216, 255, 240, 0.34),
+    0 0 16px rgba(107, 214, 160, 0.32);
+}
+
+.shop-preview-arcsaber {
+  background-color: #fff1f1;
+  box-shadow:
+    inset 0 0 0 2px rgba(35, 69, 76, 0.18),
+    inset 0 0 0 8px rgba(217, 52, 62, 0.25);
+}
+
+.shop-preview-nanoflare {
+  background-color: #effbff;
+  box-shadow:
+    inset 0 0 0 2px rgba(35, 69, 76, 0.18),
+    inset 0 0 0 8px rgba(86, 211, 255, 0.26);
+}
+
+.shop-preview-anta {
+  background-color: #e9fff9;
+  box-shadow:
+    inset 0 0 0 2px rgba(17, 24, 39, 0.2),
+    inset 0 0 0 8px rgba(65, 234, 212, 0.28),
+    inset 0 0 18px rgba(255, 61, 139, 0.2);
+}
+
+.shop-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: #23454c;
+}
+
+.shop-copy span {
+  color: #65747a;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.buy-skin-button,
+.equip-skin-button,
+.buy-racket-button,
+.equip-racket-button,
+.buy-background-button,
+.equip-background-button,
+.buy-gear-button,
+.equip-gear-button,
+.buy-perk-button,
+.equip-perk-button,
+.buy-ability-button,
+.equip-ability-button,
+#spinWheelButton,
+#redeemSkinButton,
+#redeemBackgroundButton {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: #fff8e9;
+  background: #3d7893;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.buy-skin-button:disabled,
+.equip-skin-button:disabled,
+.buy-racket-button:disabled,
+.equip-racket-button:disabled,
+.buy-background-button:disabled,
+.equip-background-button:disabled,
+.buy-gear-button:disabled,
+.equip-gear-button:disabled,
+.buy-perk-button:disabled,
+.equip-perk-button:disabled,
+.buy-ability-button:disabled,
+.equip-ability-button:disabled,
+#spinWheelButton:disabled,
+#redeemSkinButton:disabled,
+#redeemBackgroundButton:disabled {
+  color: #6a777b;
+  background: #d8e2e4;
+  cursor: not-allowed;
+}
+
+.shop-preview-court {
+  background:
+    linear-gradient(90deg, transparent 47%, rgba(245, 250, 236, 0.95) 48% 52%, transparent 53%),
+    linear-gradient(180deg, transparent 42%, rgba(245, 250, 236, 0.95) 43% 47%, transparent 48%),
+    linear-gradient(135deg, #10232b 0 28%, #1f8a7d 29% 72%, #0e4f58 73% 100%);
+}
+
+.shop-preview-judo {
+  background:
+    radial-gradient(ellipse at 50% 66%, transparent 0 34%, rgba(157, 52, 45, 0.9) 35% 42%, transparent 43%),
+    linear-gradient(90deg, transparent 47%, rgba(255, 245, 220, 0.9) 48% 52%, transparent 53%),
+    linear-gradient(135deg, #2d241d 0 28%, #d2a052 29% 72%, #9a6530 73% 100%);
+}
+
+.shop-preview-sky {
+  background:
+    radial-gradient(ellipse at 68% 28%, rgba(255,255,255,0.95) 0 14%, transparent 15%),
+    radial-gradient(ellipse at 38% 34%, rgba(255,255,255,0.88) 0 18%, transparent 19%),
+    linear-gradient(180deg, #63bff1 0 58%, #c9f0ff 59% 74%, #8ecf64 75% 100%);
+}
+
+.shop-preview-jungle {
+  background:
+    radial-gradient(ellipse at 68% 42%, rgba(12, 22, 16, 0.7) 0 10%, transparent 11%),
+    linear-gradient(135deg, transparent 0 38%, rgba(20, 65, 38, 0.95) 39% 52%, transparent 53%),
+    radial-gradient(ellipse at 38% 70%, #1f5635 0 32%, transparent 33%),
+    linear-gradient(180deg, #244d42 0 44%, #3f744e 45% 68%, #183624 69% 100%);
+}
+
+.shop-preview-wheel {
+  background:
+    conic-gradient(from 20deg, #ff9fbe, #f2eee4, #7cae9d, #d6c58f, #5edbff, #ff9fbe);
+}
+
+.shop-preview-token {
+  background:
+    radial-gradient(circle at 50% 50%, #f2eee4 0 34%, #d6c58f 35% 52%, #1f3f3b 53% 100%);
+}
+
+.shop-preview-shoes {
+  background:
+    radial-gradient(ellipse at 35% 62%, #f7fafc 0 22%, transparent 23%),
+    radial-gradient(ellipse at 66% 44%, #f7fafc 0 24%, transparent 25%),
+    linear-gradient(135deg, transparent 0 38%, #1f2937 39% 47%, transparent 48%),
+    linear-gradient(180deg, #f3f6f8 0 50%, #d8323f 51% 67%, #111827 68% 100%);
+}
+
+.shop-preview-power {
+  background:
+    radial-gradient(circle at 50% 44%, #f2eee4 0 18%, transparent 19%),
+    radial-gradient(circle at 36% 64%, #d6c58f 0 12%, transparent 13%),
+    radial-gradient(circle at 64% 64%, #d6c58f 0 12%, transparent 13%),
+    linear-gradient(135deg, #1f3f3b 0 40%, #b86f67 41% 66%, #f2eee4 67% 100%);
+}
+
+.shop-preview-jump-smash {
+  background:
+    radial-gradient(ellipse at 64% 28%, rgba(255, 217, 77, 0.95) 0 9%, transparent 10%),
+    linear-gradient(140deg, transparent 0 38%, rgba(255, 217, 77, 0.95) 39% 46%, transparent 47%),
+    radial-gradient(ellipse at 34% 66%, #f2eee4 0 20%, transparent 21%),
+    linear-gradient(180deg, #7cae9d 0 48%, #1f3f3b 49% 100%);
+}
+
+.shop-preview-pig-companion {
+  background:
+    radial-gradient(circle at 42% 42%, #ffd1df 0 19%, transparent 20%),
+    radial-gradient(circle at 34% 36%, #673344 0 3%, transparent 4%),
+    radial-gradient(circle at 50% 36%, #673344 0 3%, transparent 4%),
+    radial-gradient(ellipse at 42% 52%, #ff9fbe 0 7%, transparent 8%),
+    linear-gradient(135deg, transparent 0 47%, #8ee5ff 48% 53%, transparent 54%),
+    linear-gradient(180deg, #fff0f6 0 52%, #3d7893 53% 100%);
+}
+
+.shop-preview-bare-hands {
+  background:
+    radial-gradient(ellipse at 36% 48%, #e9decd 0 13%, transparent 14%),
+    radial-gradient(ellipse at 64% 48%, #e9decd 0 13%, transparent 14%),
+    linear-gradient(120deg, transparent 0 36%, rgba(142, 229, 255, 0.95) 37% 43%, transparent 44%),
+    linear-gradient(150deg, transparent 0 48%, rgba(255, 255, 255, 0.85) 49% 53%, transparent 54%),
+    linear-gradient(180deg, #f2eee4 0 44%, #3d7893 45% 100%);
+}
+
+.shop-copy small {
+  color: #8a5964;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.start-panel h1 {
+  margin: 0;
+  color: #23454c;
+  font-size: clamp(1.4rem, 6vw, 4.4rem);
+  line-height: 0.95;
+  text-align: center;
+  text-shadow:
+    0 3px 0 rgba(255, 255, 255, 0.8),
+    0 18px 36px rgba(36, 74, 84, 0.22);
+}
+
+.level-select {
+  display: flex;
+  max-width: min(100%, 430px);
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 26px rgba(36, 74, 84, 0.16);
+}
+
+.level-button {
+  min-width: 82px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  color: #35545c;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.level-button.is-selected {
+  color: #fff8e9;
+  background: #3d7893;
+  box-shadow: inset 0 -3px 0 rgba(15, 54, 70, 0.24);
+}
+
+.level-button:focus-visible {
+  outline: 3px solid #fff2a8;
+  outline-offset: 2px;
+}
+
+.primary-action {
+  min-width: 128px;
+  height: clamp(40px, 7vw, 48px);
+  border: 0;
+  border-radius: 8px;
+  color: #fff8e9;
+  background: #c6404f;
+  box-shadow:
+    inset 0 -4px 0 rgba(104, 16, 30, 0.26),
+    0 14px 28px rgba(128, 31, 44, 0.28);
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.primary-action:focus-visible,
+.touch-button:focus-visible {
+  outline: 3px solid #fff2a8;
+  outline-offset: 3px;
+}
+
+.primary-action:active,
+.touch-button:active {
+  transform: translateY(1px);
+}
+
+.touch-controls {
+  position: absolute;
+  right: clamp(10px, 2vw, 18px);
+  bottom: clamp(10px, 2vw, 18px);
+  display: flex;
+  gap: 10px;
+}
+
+.start-panel:not(.is-hidden) ~ .touch-controls {
+  display: none;
+}
+
+.touch-button {
+  display: grid;
+  width: clamp(34px, 8vw, 54px);
+  height: clamp(34px, 8vw, 54px);
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  border-radius: 8px;
+  place-items: center;
+  color: #23454c;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 10px 24px rgba(36, 74, 84, 0.18);
+  cursor: pointer;
+  font-size: clamp(1.45rem, 4vw, 2rem);
+  font-weight: 900;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (min-width: 900px) {
+  .touch-controls {
+    opacity: 0.4;
+  }
+}
