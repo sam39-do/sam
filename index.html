@@ -1,259 +1,83 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>灏忕唺澶у啋闄?/title>
+    <meta
+      name="description"
+      content="星原沙盒，一个可离线游玩的 2D 建造与探索小游戏。"
+    />
+    <title>星原沙盒</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="game-shell">
-      <section class="game-stage" aria-label="灏忕唺澶у啋闄?>
-        <canvas id="game" width="1500" height="500"></canvas>
+    <main class="sandbox-shell">
+      <section class="sandbox-stage" aria-label="星原沙盒">
+        <canvas
+          id="worldCanvas"
+          width="1280"
+          height="720"
+          aria-label="星原沙盒世界画布"
+        ></canvas>
 
-        <div class="hud" aria-live="polite">
-          <div class="hud-pill">
-            <span class="hud-icon">鏄?/span>
-            <span id="score">0</span>
+        <header class="top-hud" aria-live="polite">
+          <div class="hud-brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span>星原沙盒</span>
           </div>
-          <div class="hud-pill">
-            <span class="hud-icon">琛€</span>
-            <span id="lives">15</span>
+          <div class="hud-stat">
+            <span>天数</span>
+            <strong id="dayCount">1</strong>
           </div>
-          <div class="hud-pill">
-            <span class="hud-icon">鐩?/span>
-            <span id="shields">0</span>
+          <div class="hud-stat">
+            <span>时段</span>
+            <strong id="timeName">清晨</strong>
           </div>
-          <div class="hud-pill">
-            <span class="hud-icon">鏃?/span>
-            <span id="timer">260</span>
+          <div class="hud-stat">
+            <span>能量</span>
+            <strong id="energyValue">100</strong>
           </div>
-        </div>
-
-        <div class="start-panel" id="startPanel">
-          <h1>灏忕唺澶у啋闄?/h1>
-          <div class="level-select" id="levelSelect" aria-label="鍏冲崱閫夋嫨">
-            <button class="level-button is-selected" data-level="1" type="button">绗竴鍏?/button>
-            <button class="level-button" data-level="2" type="button">绗簩鍏?/button>
-            <button class="level-button" data-level="3" type="button">绗笁鍏?/button>
+          <div class="hud-stat">
+            <span>坐标</span>
+            <strong id="positionValue">0,0</strong>
           </div>
-          <button class="primary-action" id="startButton" type="button">寮€濮?/button>
-        </div>
+        </header>
 
-        <aside class="shop-panel" id="shopPanel" aria-label="閬撳叿鍟嗗簵">
-          <div class="shop-title">閬撳叿鍟嗗簵</div>
-          <div class="shop-balance">鏄?<span id="shopStars">0</span></div>
-
-          <div class="shop-item" data-skin="gundam">
-            <div class="shop-preview shop-preview-gundam" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>缁忓吀鏈虹敳鐨偆</strong>
-              <span>鍞环 50 鏄?/span>
-            </div>
-            <button class="buy-skin-button" data-skin="gundam" type="button">璐拱</button>
-            <button class="equip-skin-button" data-skin="gundam" type="button">瑁呭</button>
-          </div>
-
-          <div class="shop-item" data-skin="homelander">
-            <div class="shop-preview shop-preview-homelander" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>绁栧浗浜洪鏍肩毊鑲?/strong>
-              <span>鍞环 50 鏄?/span>
-            </div>
-            <button class="buy-skin-button" data-skin="homelander" type="button">璐拱</button>
-            <button class="equip-skin-button" data-skin="homelander" type="button">瑁呭</button>
-          </div>
-
-          <div class="shop-item" data-skin="momota">
-            <div class="shop-preview shop-preview-momota" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>妗冪敯璐ゆ枟椋庢牸鐨偆</strong>
-              <span>鍞环 50 鏄?/span>
-            </div>
-            <button class="buy-skin-button" data-skin="momota" type="button">璐拱</button>
-            <button class="equip-skin-button" data-skin="momota" type="button">瑁呭</button>
-          </div>
-
-          <div class="shop-section-title">鐞冩媿</div>
-
-          <div class="shop-item" data-racket="starter">
-            <div class="shop-preview shop-preview-starter" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Starter Bear Racket</strong>
-              <span>Default racket 路 free</span>
-            </div>
-            <button class="buy-racket-button" data-racket="starter" type="button">Owned</button>
-            <button class="equip-racket-button" data-racket="starter" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-racket="victor100x">
-            <div class="shop-preview shop-preview-victor" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Global Launch Auraspeed 100X Ultra</strong>
-              <small>Global launch limited: 2 public copies, random shop refresh.</small>
-              <span>Limited racket skin - 100000 stars</span>
-            </div>
-            <button class="buy-racket-button" data-racket="victor100x" type="button">Unlock</button>
-            <button class="equip-racket-button" data-racket="victor100x" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-racket="arcsaber7tour">
-            <div class="shop-preview shop-preview-arcsaber" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Yonex Arcsaber 7 Tour</strong>
-              <span>鍞环 1000 鏄?/span>
-            </div>
-            <button class="buy-racket-button" data-racket="arcsaber7tour" type="button">璐拱</button>
-            <button class="equip-racket-button" data-racket="arcsaber7tour" type="button">瑁呭</button>
-          </div>
-
-          <div class="shop-item" data-racket="nanoflare700game">
-            <div class="shop-preview shop-preview-nanoflare" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Yonex Nanoflare 700 Game</strong>
-              <span>鍞环 1000 鏄?/span>
-            </div>
-            <button class="buy-racket-button" data-racket="nanoflare700game" type="button">璐拱</button>
-            <button class="equip-racket-button" data-racket="nanoflare700game" type="button">瑁呭</button>
-          </div>
-          <div class="shop-item" data-racket="antaDingyin1000">
-            <div class="shop-preview shop-preview-anta" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Anta Dingyin 1000</strong>
-              <span>10000 stars unlock</span>
-            </div>
-            <button class="buy-racket-button" data-racket="antaDingyin1000" type="button">Unlock</button>
-            <button class="equip-racket-button" data-racket="antaDingyin1000" type="button">Equip</button>
-          </div>
-
-          <div class="shop-section-title">Background</div>
-
-          <div class="shop-item" data-background="badmintonCourt">
-            <div class="shop-preview shop-preview-court" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Olympic Court Background</strong>
-              <span>10000 stars</span>
-            </div>
-            <button class="buy-background-button" data-background="badmintonCourt" type="button">Unlock</button>
-            <button class="equip-background-button" data-background="badmintonCourt" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-background="judoDojo">
-            <div class="shop-preview shop-preview-judo" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Championship Judo Dojo</strong>
-              <span>10000 stars</span>
-            </div>
-            <button class="buy-background-button" data-background="judoDojo" type="button">Unlock</button>
-            <button class="equip-background-button" data-background="judoDojo" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-background="skyClouds">
-            <div class="shop-preview shop-preview-sky" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Blue Sky Clouds</strong>
-              <span>10000 stars</span>
-            </div>
-            <button class="buy-background-button" data-background="skyClouds" type="button">Unlock</button>
-            <button class="equip-background-button" data-background="skyClouds" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-background="livingJungle">
-            <div class="shop-preview shop-preview-jungle" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Living Jungle</strong>
-              <span>10000 stars</span>
-            </div>
-            <button class="buy-background-button" data-background="livingJungle" type="button">Unlock</button>
-            <button class="equip-background-button" data-background="livingJungle" type="button">Equip</button>
-          </div>
-
-          <div class="shop-section-title">Lucky Wheel</div>
-
-          <div class="shop-section-title">Gear</div>
-
-          <div class="shop-item" data-gear="victorP9200Tty">
-            <div class="shop-preview shop-preview-shoes" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Yonex Power Cushion 65X4</strong>
-              <span>100000 stars - I key equip</span>
-            </div>
-            <button class="buy-gear-button" data-gear="victorP9200Tty" type="button">Unlock</button>
-            <button class="equip-gear-button" data-gear="victorP9200Tty" type="button">Equip</button>
-          </div>
-
-          <div class="shop-item" data-perk="barefootPower">
-            <div class="shop-preview shop-preview-power" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Barefoot Power Boost</strong>
-              <span>10000 stars 路 no shoes +40%</span>
-            </div>
-            <button class="buy-perk-button" data-perk="barefootPower" type="button">Unlock</button>
-            <button class="equip-perk-button" data-perk="barefootPower" type="button">Enable</button>
-          </div>
-
-          <div class="shop-item" data-ability="jumpSmash">
-            <div class="shop-preview shop-preview-jump-smash" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Jump Smash Ability</strong>
-              <span>10000 stars - air attack</span>
-            </div>
-            <button class="buy-ability-button" data-ability="jumpSmash" type="button">Unlock</button>
-            <button class="equip-ability-button" data-ability="jumpSmash" type="button">Enable</button>
-          </div>
-
-          <div class="shop-item" data-ability="pigCompanion">
-            <div class="shop-preview shop-preview-pig-companion" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Pig Pistol Companion</strong>
-              <span>10000 stars - auto pet attack</span>
-            </div>
-            <button class="buy-ability-button" data-ability="pigCompanion" type="button">Unlock</button>
-            <button class="equip-ability-button" data-ability="pigCompanion" type="button">Enable</button>
-          </div>
-
-          <div class="shop-item" data-ability="bareHands">
-            <div class="shop-preview shop-preview-bare-hands" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Bare Hands Sprint</strong>
-              <span>30000 stars - stomp only</span>
-            </div>
-            <button class="buy-ability-button" data-ability="bareHands" type="button">Unlock</button>
-            <button class="equip-ability-button" data-ability="bareHands" type="button">Enable</button>
-          </div>
-
-          <div class="shop-item shop-wheel">
-            <div class="shop-preview shop-preview-wheel" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Lucky Wheel</strong>
-              <span>7777 stars / Token <span id="shopTokens">0</span></span>
-              <small id="wheelResult">Skin 99% 路 Token 0.999% 路 Background 0.001%</small>
-            </div>
-            <button id="spinWheelButton" type="button">Spin</button>
-          </div>
-
-          <div class="shop-item shop-wheel">
-            <div class="shop-preview shop-preview-token" aria-hidden="true"></div>
-            <div class="shop-copy">
-              <strong>Token Exchange</strong>
-              <span>1 token = skin 路 10 tokens = background</span>
-            </div>
-            <button id="redeemSkinButton" type="button">Skin</button>
-            <button id="redeemBackgroundButton" type="button">Background</button>
-          </div>
+        <aside class="inventory-panel" aria-label="资源背包">
+          <div class="panel-title">背包</div>
+          <div class="inventory-grid" id="inventoryGrid"></div>
         </aside>
 
-        <div class="touch-controls" aria-hidden="false">
-          <button class="touch-button" data-key="left" type="button" aria-label="鍚戝乏">鈫?/button>
-          <button class="touch-button" data-key="jump" type="button" aria-label="璺宠穬">鈫?/button>
-          <button class="touch-button" data-key="attack" type="button" aria-label="鏀诲嚮">M1</button>
-          <button class="touch-button" data-key="right" type="button" aria-label="鍚戝彸">鈫?/button>
+        <aside class="craft-panel" aria-label="合成">
+          <div class="panel-title">合成</div>
+          <button class="craft-button" data-craft="plank" type="button">木板</button>
+          <button class="craft-button" data-craft="lamp" type="button">灯</button>
+        </aside>
+
+        <nav class="toolbelt" id="toolbelt" aria-label="工具栏"></nav>
+
+        <div class="action-panel">
+          <button id="modeButton" type="button">生存</button>
+          <button id="saveButton" type="button">保存</button>
+          <button id="resetButton" type="button">重置</button>
+        </div>
+
+        <div class="message-feed" id="messageFeed" aria-live="polite"></div>
+
+        <div class="intro-panel" id="introPanel">
+          <h1>星原沙盒</h1>
+          <p>挖开山体，搭一座会发光的小基地。</p>
+          <button id="playButton" type="button">进入世界</button>
+        </div>
+
+        <div class="touch-controls" aria-label="触屏控制">
+          <button class="touch-button" data-input="left" type="button" aria-label="向左">‹</button>
+          <button class="touch-button" data-input="jump" type="button" aria-label="跳跃">⌃</button>
+          <button class="touch-button" data-input="right" type="button" aria-label="向右">›</button>
         </div>
       </section>
     </main>
 
-    <script src="game.js"></script>
+    <script src="sandbox.js"></script>
   </body>
 </html>
-
-

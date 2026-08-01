@@ -43,5 +43,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`小熊心心冒险: http://127.0.0.1:${port}`);
+  console.log(`星原沙盒: http://127.0.0.1:${port}`);
 });
