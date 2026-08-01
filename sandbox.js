@@ -14,6 +14,7 @@ const inventoryGrid = document.getElementById("inventoryGrid");
 const toolbelt = document.getElementById("toolbelt");
 const shopPanel = document.getElementById("shopPanel");
 const shopButton = document.getElementById("shopButton");
+const modeButton = document.getElementById("modeButton");
 const closeShopButton = document.getElementById("closeShopButton");
 const saveButton = document.getElementById("saveButton");
 const resetButton = document.getElementById("resetButton");
@@ -26,17 +27,21 @@ const racketShop = document.getElementById("racketShop");
 const abilityShop = document.getElementById("abilityShop");
 const spinButton = document.getElementById("spinButton");
 
-const SAVE_KEY = "bear3dSurvivalSandboxV1";
-const WORLD_SIZE = 30;
+const SAVE_KEY = "bear3dSurvivalSandboxV2";
+const WORLD_SIZE = 72;
 const HALF_WORLD = WORLD_SIZE / 2;
 const PLAYER_MAX_LIVES = 15;
 const PLAYER_MAX_SHIELDS = 3;
+const PLAYER_RADIUS = 0.36;
+const PLAYER_HEIGHT = 1.85;
+const INTERACT_RANGE = 8;
+const CREATIVE_INTERACT_RANGE = 18;
 const BLOCKS = {
-  grass: { name: "草方块", color: 0x67a75c, count: 18 },
-  dirt: { name: "泥土", color: 0x7a5835, count: 18 },
-  stone: { name: "石头", color: 0x7d8790, count: 8 },
-  wood: { name: "原木", color: 0x8d5e33, count: 4 },
-  lamp: { name: "灯", color: 0xf0c64a, count: 2 },
+  grass: { name: "草方块", color: 0x67a75c, count: 64 },
+  dirt: { name: "泥土", color: 0x7a5835, count: 64 },
+  stone: { name: "石头", color: 0x7d8790, count: 36 },
+  wood: { name: "原木", color: 0x8d5e33, count: 24 },
+  lamp: { name: "灯", color: 0xf0c64a, count: 12 },
 };
 
 const SHOP_SKINS = {
@@ -115,9 +120,9 @@ const TOOL_SLOTS = [
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x6db8d2);
-scene.fog = new THREE.Fog(0x6db8d2, 28, 74);
+scene.fog = new THREE.Fog(0x6db8d2, 54, 150);
 
-const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 120);
+const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 220);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.shadowMap.enabled = true;
@@ -151,6 +156,7 @@ scene.add(blockMeshes);
 
 const state = {
   started: false,
+  mode: "survival",
   stars: 0,
   lives: PLAYER_MAX_LIVES,
   shields: 0,
@@ -163,7 +169,7 @@ const state = {
   inventory: Object.fromEntries(Object.entries(BLOCKS).map(([id, item]) => [id, item.count])),
   ownedSkins: { bear: true },
   ownedRackets: { starter: true },
-  ownedAbilities: {},
+  ownedAbilities: { pigCompanion: true },
   yaw: 0,
   pitch: -0.38,
   messageTimer: 0,
@@ -208,7 +214,7 @@ function init() {
 
 function setupWorld() {
   const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(80, 80),
+    new THREE.PlaneGeometry(150, 150),
     new THREE.MeshStandardMaterial({ color: 0x4f9db3, roughness: 0.7, metalness: 0.05 }),
   );
   water.rotation.x = -Math.PI / 2;
@@ -227,11 +233,16 @@ function setupWorld() {
   }
 
   for (const tree of [
+    [-22, -18],
+    [-16, 18],
     [-8, -7],
     [-5, 7],
     [6, -8],
     [10, 4],
-    [-12, 9],
+    [18, -20],
+    [22, 16],
+    [-28, 9],
+    [28, -4],
   ]) {
     addTree(tree[0], tree[1]);
   }
@@ -368,6 +379,15 @@ function rebuildPlayerModel() {
 
   if (state.weaponMode === "pistol") {
     player.group.add(box(0.34, 0.12, 0.16, mat(0x26303a), 0.64, 0.9, -0.42));
+    if (state.ownedAbilities.pigCompanion) {
+      const pig = new THREE.Group();
+      pig.name = "pigCompanion";
+      pig.add(sphere(0.2, mat(0xff9fbe), -0.72, 0.52, 0.62));
+      pig.add(sphere(0.09, mat(0xffc0d3), -0.86, 0.6, 0.48));
+      pig.add(sphere(0.09, mat(0xffc0d3), -0.58, 0.6, 0.48));
+      pig.add(box(0.28, 0.12, 0.14, mat(0x26303a), -0.72, 0.5, 0.34));
+      player.group.add(pig);
+    }
   }
 }
 
@@ -401,23 +421,27 @@ function mat(color, roughness = 0.65, metalness = 0) {
 
 function setupEnemies() {
   const monsterSpawns = [
-    ["zombie", -9, -3],
-    ["zombie", -3, 10],
-    ["zombie", 8, -9],
-    ["racketMonster", 7, 8],
-    ["racketMonster", -11, 9],
-    ["turret", 0, -12],
-    ["turret", 12, 0],
+    ["zombie", -16, -8],
+    ["zombie", -8, 18],
+    ["zombie", 16, -17],
+    ["zombie", 24, 8],
+    ["zombie", -25, 14],
+    ["racketMonster", 12, 15],
+    ["racketMonster", -19, 22],
+    ["racketMonster", 26, -24],
+    ["turret", 0, -24],
+    ["turret", 24, 0],
+    ["turret", -28, -22],
   ];
 
   for (const [type, x, z] of monsterSpawns) {
     spawnEnemy(type, x, z);
   }
 
-  boss = spawnEnemy("rabbitBoss", 13, 13);
+  boss = spawnEnemy("rabbitBoss", 30, 30);
   boss.active = false;
-  spawnEnemy("zombieBoss", -14, 12).active = false;
-  spawnEnemy("gundamBoss", 13, -14).active = false;
+  spawnEnemy("zombieBoss", -31, 28).active = false;
+  spawnEnemy("gundamBoss", 31, -31).active = false;
 }
 
 function spawnEnemy(type, x, z) {
@@ -618,6 +642,7 @@ function bindEvents() {
     shopPanel.classList.toggle("is-hidden");
     renderShop();
   });
+  modeButton.addEventListener("click", toggleMode);
   closeShopButton.addEventListener("click", () => shopPanel.classList.add("is-hidden"));
   saveButton.addEventListener("click", () => saveGame(true));
   resetButton.addEventListener("click", resetGame);
@@ -636,16 +661,15 @@ function onKey(event, pressed) {
     const index = Number(event.code.replace("Digit", "")) - 1;
     if (index >= 0 && index < TOOL_SLOTS.length) selectSlot(index);
   } else if (pressed && event.code === "KeyQ") {
-    if (state.ownedAbilities.pigCompanion) {
-      state.weaponMode = state.weaponMode === "pistol" ? "racket" : "pistol";
-      state.selectedSlot = state.weaponMode === "pistol" ? 1 : 0;
-      rebuildPlayerModel();
-      announce(state.weaponMode === "pistol" ? "小猪伙伴/手枪模式" : "球拍模式");
-    } else {
-      announce("商店解锁小猪伙伴后可切换");
-    }
+    state.ownedAbilities.pigCompanion = true;
+    state.weaponMode = state.weaponMode === "pistol" ? "racket" : "pistol";
+    state.selectedSlot = state.weaponMode === "pistol" ? 1 : 0;
+    rebuildPlayerModel();
+    announce(state.weaponMode === "pistol" ? "小猪伙伴/手枪模式" : "球拍模式");
   } else if (pressed && event.code === "KeyE") {
     fireProjectile(true);
+  } else if (pressed && event.code === "KeyC") {
+    toggleMode();
   } else if (pressed && event.code === "KeyG") {
     announce("Forehand Drive / Backhand Smash / Drop Shot");
   } else if (pressed && event.code === "KeyI") {
@@ -681,6 +705,16 @@ function onMouseDown(event) {
     input.mouseDown = true;
     useSelectedTool();
   }
+}
+
+function toggleMode() {
+  state.mode = state.mode === "creative" ? "survival" : "creative";
+  if (state.mode === "creative") {
+    state.lives = PLAYER_MAX_LIVES;
+    state.shields = PLAYER_MAX_SHIELDS;
+  }
+  announce(state.mode === "creative" ? "创造模式：无限方块、飞行、无伤害" : "生存模式：怪物和 Boss 会攻击");
+  updateUI();
 }
 
 function requestMouseLock() {
@@ -729,22 +763,90 @@ function updatePlayer(dt) {
 
   const speedBoost = state.shoesOn ? 1.5 : 1;
   const sprintBoost = input.sprint ? 1.35 : 1;
-  player.velocity.x = move.x * player.speed * speedBoost * sprintBoost;
-  player.velocity.z = move.z * player.speed * speedBoost * sprintBoost;
-  player.velocity.y -= 18 * dt;
+  const modeBoost = state.mode === "creative" ? 1.4 : 1;
+  player.velocity.x = move.x * player.speed * speedBoost * sprintBoost * modeBoost;
+  player.velocity.z = move.z * player.speed * speedBoost * sprintBoost * modeBoost;
+  player.velocity.y -= state.mode === "creative" ? 0 : 18 * dt;
 
   const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
-  if (player.position.y <= groundY + 0.01) {
+  if (state.mode === "creative") {
+    if (input.jump) player.velocity.y = 5.5;
+    else if (input.sprint) player.velocity.y = -5.5;
+    else player.velocity.y = 0;
+  } else if (player.position.y <= groundY + 0.01) {
     player.position.y = groundY;
     player.velocity.y = Math.max(0, player.velocity.y);
     if (input.jump) player.velocity.y = state.ownedAbilities.jumpSmash ? 9 : 7.2;
   }
 
-  player.position.addScaledVector(player.velocity, dt);
+  movePlayerWithCollision(dt);
   player.position.x = THREE.MathUtils.clamp(player.position.x, -HALF_WORLD + 1, HALF_WORLD - 1);
   player.position.z = THREE.MathUtils.clamp(player.position.z, -HALF_WORLD + 1, HALF_WORLD - 1);
   player.group.position.copy(player.position);
   player.group.rotation.y = state.yaw;
+}
+
+function movePlayerWithCollision(dt) {
+  const nextX = player.position.x + player.velocity.x * dt;
+  if (state.mode === "creative" || !bodyCollides(nextX, player.position.y, player.position.z, PLAYER_RADIUS)) {
+    player.position.x = nextX;
+  } else {
+    player.velocity.x = 0;
+  }
+
+  const nextZ = player.position.z + player.velocity.z * dt;
+  if (state.mode === "creative" || !bodyCollides(player.position.x, player.position.y, nextZ, PLAYER_RADIUS)) {
+    player.position.z = nextZ;
+  } else {
+    player.velocity.z = 0;
+  }
+
+  const nextY = player.position.y + player.velocity.y * dt;
+  if (state.mode === "creative" || !bodyCollides(player.position.x, nextY, player.position.z, PLAYER_RADIUS)) {
+    player.position.y = nextY;
+  } else if (player.velocity.y > 0) {
+    player.velocity.y = 0;
+  }
+
+  if (state.mode !== "creative") {
+    const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
+    if (player.position.y < groundY) {
+      player.position.y = groundY;
+      player.velocity.y = 0;
+    }
+  }
+}
+
+function bodyCollides(x, y, z, radius = 0.36, height = PLAYER_HEIGHT) {
+  const minX = Math.floor(x - radius - 0.5);
+  const maxX = Math.ceil(x + radius + 0.5);
+  const minY = Math.floor(y + 0.05);
+  const maxY = Math.ceil(y + height);
+  const minZ = Math.floor(z - radius - 0.5);
+  const maxZ = Math.ceil(z + radius + 0.5);
+
+  for (let bx = minX; bx <= maxX; bx += 1) {
+    for (let by = minY; by <= maxY; by += 1) {
+      for (let bz = minZ; bz <= maxZ; bz += 1) {
+        if (!blocks.has(keyFor(bx, by, bz))) continue;
+        const blockMinX = bx - 0.5;
+        const blockMaxX = bx + 0.5;
+        const blockMinY = by;
+        const blockMaxY = by + 1;
+        const blockMinZ = bz - 0.5;
+        const blockMaxZ = bz + 0.5;
+        const overlaps =
+          x + radius > blockMinX &&
+          x - radius < blockMaxX &&
+          y + height > blockMinY &&
+          y + 0.08 < blockMaxY &&
+          z + radius > blockMinZ &&
+          z - radius < blockMaxZ;
+        if (overlaps) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function getGroundY(x, z) {
@@ -775,7 +877,7 @@ function updateEnemies(dt) {
     }
 
     if (enemy.type !== "turret" && distance > 1.5) {
-      enemy.position.addScaledVector(toPlayer, enemy.speed * dt);
+      moveEnemyWithCollision(enemy, toPlayer, enemy.speed * dt);
       enemy.position.y = getGroundY(enemy.position.x, enemy.position.z);
     }
 
@@ -792,6 +894,18 @@ function updateEnemies(dt) {
     enemy.group.position.y += Math.sin(performance.now() / 260 + enemy.position.x) * 0.03;
   }
   if (!activeBoss && boss && boss.defeated) boss = null;
+}
+
+function moveEnemyWithCollision(enemy, direction, amount) {
+  const radius = enemy.type.includes("Boss") ? 0.9 : 0.42;
+  const nextX = enemy.position.x + direction.x * amount;
+  if (!bodyCollides(nextX, enemy.position.y, enemy.position.z, radius, enemy.type.includes("Boss") ? 2.4 : 1.5)) {
+    enemy.position.x = nextX;
+  }
+  const nextZ = enemy.position.z + direction.z * amount;
+  if (!bodyCollides(enemy.position.x, enemy.position.y, nextZ, radius, enemy.type.includes("Boss") ? 2.4 : 1.5)) {
+    enemy.position.z = nextZ;
+  }
 }
 
 function getActiveBoss() {
@@ -817,13 +931,13 @@ function meleeAttack() {
   const direction = getLookDirection();
   const origin = player.position.clone().add(new THREE.Vector3(0, 1.1, 0));
   let hit = null;
-  let best = racket.range;
+  let best = Math.max(racket.range + 1.2, 4.4);
   for (const enemy of enemies) {
     if (!enemy.active || enemy.defeated || enemy.invulnerable > 0) continue;
     const toEnemy = enemy.position.clone().add(new THREE.Vector3(0, 1, 0)).sub(origin);
     const distance = toEnemy.length();
     const angle = direction.angleTo(toEnemy.normalize());
-    if (distance < best && angle < 0.82) {
+    if (distance < best && angle < 1.2) {
       best = distance;
       hit = enemy;
     }
@@ -937,6 +1051,7 @@ function summonPack(origin, type) {
 }
 
 function hurtPlayer(amount, source) {
+  if (state.mode === "creative") return;
   if (state.invulnerable > 0) return;
   state.invulnerable = 0.75;
   if (state.shields > 0) {
@@ -957,7 +1072,7 @@ function hurtPlayer(amount, source) {
 function mineTargetBlock() {
   const hit = raycastBlock();
   if (!hit) return;
-  if (hit.distance > 6) {
+  if (hit.distance > getInteractRange()) {
     announce("距离太远");
     return;
   }
@@ -967,21 +1082,40 @@ function mineTargetBlock() {
 function placeSelectedBlock() {
   const slot = TOOL_SLOTS[state.selectedSlot];
   if (slot.type !== "block") return;
-  if ((state.inventory[slot.id] || 0) <= 0) {
+  if (state.mode !== "creative" && (state.inventory[slot.id] || 0) <= 0) {
     announce("背包没有这个方块");
     return;
   }
   const hit = raycastBlock();
-  if (!hit || hit.distance > 7) return;
+  if (!hit || hit.distance > getInteractRange()) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();
   const pos = hit.object.position.clone().add(normal);
   const x = Math.round(pos.x);
   const y = Math.round(pos.y - 0.5);
   const z = Math.round(pos.z);
+  if (state.mode !== "creative" && blockOverlapsPlayer(x, y, z)) {
+    announce("不能把方块放进身体里");
+    return;
+  }
   if (addBlock(x, y, z, slot.id, true)) {
-    state.inventory[slot.id] -= 1;
+    if (state.mode !== "creative") state.inventory[slot.id] -= 1;
     announce(`${BLOCKS[slot.id].name}已放置`);
   }
+}
+
+function getInteractRange() {
+  return state.mode === "creative" ? CREATIVE_INTERACT_RANGE : INTERACT_RANGE;
+}
+
+function blockOverlapsPlayer(x, y, z) {
+  return (
+    player.position.x + PLAYER_RADIUS > x - 0.5 &&
+    player.position.x - PLAYER_RADIUS < x + 0.5 &&
+    player.position.y + PLAYER_HEIGHT > y &&
+    player.position.y + 0.08 < y + 1 &&
+    player.position.z + PLAYER_RADIUS > z - 0.5 &&
+    player.position.z - PLAYER_RADIUS < z + 0.5
+  );
 }
 
 function raycastBlock() {
@@ -1056,19 +1190,20 @@ function updateUI() {
   shieldValue.textContent = state.shields.toString();
   starValue.textContent = state.stars.toString();
   shopStars.textContent = state.stars.toString();
+  modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   weaponValue.textContent = state.weaponMode === "pistol" ? "手枪/伙伴" : SHOP_RACKETS[state.equippedRacket].name;
   const activeBoss = getActiveBoss();
   bossValue.textContent = activeBoss ? activeBoss.name : "未激活";
 
   for (const id of Object.keys(BLOCKS)) {
     const node = document.querySelector(`[data-count="${id}"]`);
-    if (node) node.textContent = String(state.inventory[id] || 0);
+    if (node) node.textContent = state.mode === "creative" ? "∞" : String(state.inventory[id] || 0);
   }
   Array.from(toolbelt.children).forEach((button, index) => {
     const slot = TOOL_SLOTS[index];
     button.classList.toggle("is-selected", index === state.selectedSlot);
     const count = button.querySelector(".tool-count");
-    count.textContent = slot.type === "block" ? String(state.inventory[slot.id] || 0) : "";
+    count.textContent = slot.type === "block" ? (state.mode === "creative" ? "∞" : String(state.inventory[slot.id] || 0)) : "";
   });
 }
 
@@ -1086,6 +1221,7 @@ function saveGame(showMessage) {
   }
   const payload = {
     stars: state.stars,
+    mode: state.mode,
     lives: state.lives,
     shields: state.shields,
     selectedSlot: state.selectedSlot,
@@ -1115,6 +1251,7 @@ function loadGame() {
     const save = JSON.parse(raw);
     Object.assign(state, {
       stars: save.stars || 0,
+      mode: save.mode === "creative" ? "creative" : "survival",
       lives: save.lives || PLAYER_MAX_LIVES,
       shields: save.shields || 0,
       selectedSlot: save.selectedSlot || 0,
@@ -1126,7 +1263,7 @@ function loadGame() {
       inventory: { ...state.inventory, ...(save.inventory || {}) },
       ownedSkins: { bear: true, ...(save.ownedSkins || {}) },
       ownedRackets: { starter: true, ...(save.ownedRackets || {}) },
-      ownedAbilities: { ...(save.ownedAbilities || {}) },
+      ownedAbilities: { pigCompanion: true, ...(save.ownedAbilities || {}) },
     });
     if (Array.isArray(save.player)) player.position.fromArray(save.player);
     rebuildPlayerModel();
