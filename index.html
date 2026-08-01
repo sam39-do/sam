@@ -5,79 +5,82 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="星原沙盒，一个可离线游玩的 2D 建造与探索小游戏。"
+      content="小熊 3D 生存沙盒，恢复武器、商店、皮肤、怪兽和 Boss 的立体沙盒游戏。"
     />
-    <title>星原沙盒</title>
+    <title>小熊 3D 生存沙盒</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="sandbox-shell">
-      <section class="sandbox-stage" aria-label="星原沙盒">
-        <canvas
-          id="worldCanvas"
-          width="1280"
-          height="720"
-          aria-label="星原沙盒世界画布"
-        ></canvas>
+    <main class="game-shell">
+      <section class="game-stage" aria-label="小熊 3D 生存沙盒">
+        <canvas id="gameCanvas" aria-label="3D 生存沙盒画面"></canvas>
 
         <header class="top-hud" aria-live="polite">
           <div class="hud-brand">
             <span class="brand-mark" aria-hidden="true"></span>
-            <span>星原沙盒</span>
+            <span>小熊 3D 生存沙盒</span>
           </div>
-          <div class="hud-stat">
-            <span>天数</span>
-            <strong id="dayCount">1</strong>
-          </div>
-          <div class="hud-stat">
-            <span>时段</span>
-            <strong id="timeName">清晨</strong>
-          </div>
-          <div class="hud-stat">
-            <span>能量</span>
-            <strong id="energyValue">100</strong>
-          </div>
-          <div class="hud-stat">
-            <span>坐标</span>
-            <strong id="positionValue">0,0</strong>
-          </div>
+          <div class="hud-pill"><span>生命</span><strong id="lifeValue">15</strong></div>
+          <div class="hud-pill"><span>护盾</span><strong id="shieldValue">0</strong></div>
+          <div class="hud-pill"><span>星星</span><strong id="starValue">0</strong></div>
+          <div class="hud-pill"><span>武器</span><strong id="weaponValue">球拍</strong></div>
+          <div class="hud-pill"><span>Boss</span><strong id="bossValue">未激活</strong></div>
         </header>
 
         <aside class="inventory-panel" aria-label="资源背包">
-          <div class="panel-title">背包</div>
+          <div class="panel-title">生存背包</div>
           <div class="inventory-grid" id="inventoryGrid"></div>
         </aside>
 
-        <aside class="craft-panel" aria-label="合成">
-          <div class="panel-title">合成</div>
-          <button class="craft-button" data-craft="plank" type="button">木板</button>
-          <button class="craft-button" data-craft="lamp" type="button">灯</button>
+        <aside class="shop-panel is-hidden" id="shopPanel" aria-label="道具商店">
+          <div class="shop-head">
+            <div>
+              <div class="panel-title">道具商店</div>
+              <strong>武器、皮肤、技能</strong>
+            </div>
+            <button id="closeShopButton" type="button" aria-label="关闭商店">×</button>
+          </div>
+          <div class="shop-balance">星星 <strong id="shopStars">0</strong></div>
+          <div class="shop-section">皮肤</div>
+          <div class="shop-list" id="skinShop"></div>
+          <div class="shop-section">球拍武器</div>
+          <div class="shop-list" id="racketShop"></div>
+          <div class="shop-section">装备和技能</div>
+          <div class="shop-list" id="abilityShop"></div>
+          <div class="shop-section">幸运转盘</div>
+          <button class="shop-wide-button" id="spinButton" type="button">7777 星星抽奖</button>
         </aside>
 
         <nav class="toolbelt" id="toolbelt" aria-label="工具栏"></nav>
 
         <div class="action-panel">
-          <button id="modeButton" type="button">生存</button>
+          <button id="shopButton" type="button">商店</button>
           <button id="saveButton" type="button">保存</button>
-          <button id="resetButton" type="button">重置</button>
+          <button id="resetButton" type="button">重开</button>
+        </div>
+
+        <div class="boss-hud is-hidden" id="bossHud">
+          <div class="boss-hud-row">
+            <strong id="bossName">Boss</strong>
+            <span id="bossHpText">0/0</span>
+          </div>
+          <div class="boss-bar"><span id="bossHpBar"></span></div>
         </div>
 
         <div class="message-feed" id="messageFeed" aria-live="polite"></div>
 
         <div class="intro-panel" id="introPanel">
-          <h1>星原沙盒</h1>
-          <p>挖开山体，搭一座会发光的小基地。</p>
-          <button id="playButton" type="button">进入世界</button>
+          <h1>小熊 3D 生存沙盒</h1>
+          <p>旧武器、商店、怪兽和 Boss 已回到生存模式。现在是立体沙盒世界。</p>
+          <button id="playButton" type="button">进入生存模式</button>
         </div>
 
-        <div class="touch-controls" aria-label="触屏控制">
-          <button class="touch-button" data-input="left" type="button" aria-label="向左">‹</button>
-          <button class="touch-button" data-input="jump" type="button" aria-label="跳跃">⌃</button>
-          <button class="touch-button" data-input="right" type="button" aria-label="向右">›</button>
+        <div class="control-help">
+          WASD 移动 · 鼠标转视角 · 左键攻击/挖掘 · 右键放置 · 1-8 切工具 · Q 切枪/伙伴 · E 射击 · G 换打法 · I 跑鞋 · Shift 冲刺
         </div>
       </section>
     </main>
 
-    <script src="sandbox.js"></script>
+    <script type="module" src="sandbox.js"></script>
   </body>
 </html>
