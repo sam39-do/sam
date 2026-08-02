@@ -30,7 +30,9 @@ const racketShop = document.getElementById("racketShop");
 const abilityShop = document.getElementById("abilityShop");
 const spinButton = document.getElementById("spinButton");
 
-const QA_ENABLED = new URLSearchParams(window.location.search).has("qa");
+const URL_PARAMS = new URLSearchParams(window.location.search);
+const QA_ENABLED = URL_PARAMS.has("qa");
+const AUTHOR_ENABLED = URL_PARAMS.has("author");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
 const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
@@ -233,6 +235,7 @@ scene.add(blockMeshes);
 
 const state = {
   started: false,
+  authorMode: AUTHOR_ENABLED,
   mode: "survival",
   stars: 0,
   lives: PLAYER_MAX_LIVES,
@@ -1177,13 +1180,13 @@ function buyOrEquip(kind, id) {
   const [items, owned, equippedKey] = collections[kind];
   const item = items[id];
   if (!owned[id]) {
-    if (state.stars < item.price) {
+    if (!state.authorMode && state.stars < item.price) {
       announce("星星不够");
       return;
     }
-    state.stars -= item.price;
+    if (!state.authorMode) state.stars -= item.price;
     owned[id] = true;
-    announce(`已购买 ${item.name}`);
+    announce(state.authorMode ? `作者模式解锁 ${item.name}` : `已购买 ${item.name}`);
   }
   state[equippedKey] = id;
   if (kind === "skin") rebuildPlayerModel();
@@ -1268,6 +1271,8 @@ function onKey(event, pressed) {
     teleportToNearestVolcano();
   } else if (pressed && event.code === "KeyJ") {
     toggleOdmGear();
+  } else if (pressed && event.code === "KeyO") {
+    toggleAuthorMode();
   } else if (pressed && event.code === "KeyG") {
     announce("Forehand Drive / Backhand Smash / Drop Shot");
   } else if (pressed && event.code === "KeyI") {
@@ -1364,6 +1369,14 @@ function toggleOdmGear() {
     announce("立体机动装置已脱下，球拍恢复");
   }
   rebuildPlayerModel();
+  updateUI();
+}
+
+function toggleAuthorMode() {
+  state.authorMode = !state.authorMode;
+  if (state.authorMode) state.stars = Math.max(state.stars, 999999);
+  announce(state.authorMode ? "作者模式：无限星星已开启" : "作者模式：无限星星已关闭");
+  renderShop();
   updateUI();
 }
 
@@ -2376,8 +2389,9 @@ function updateMinimap() {
 function updateUI() {
   lifeValue.textContent = Number.isInteger(state.lives) ? state.lives.toString() : state.lives.toFixed(1);
   shieldValue.textContent = state.shields.toString();
-  starValue.textContent = state.stars.toString();
-  shopStars.textContent = state.stars.toString();
+  const starText = state.authorMode ? "∞" : state.stars.toString();
+  starValue.textContent = starText;
+  shopStars.textContent = starText;
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   weaponValue.textContent = state.odmEquipped
     ? "赤风立体机动"
@@ -2414,6 +2428,7 @@ function saveGame(showMessage) {
     placedBlocks.push([x, y, z, type]);
   }
   const payload = {
+    authorMode: state.authorMode,
     stars: state.stars,
     mode: state.mode,
     lives: state.lives,
@@ -2446,6 +2461,7 @@ function loadGame() {
     }
     const save = JSON.parse(raw);
     Object.assign(state, {
+      authorMode: AUTHOR_ENABLED || Boolean(save.authorMode),
       stars: save.stars || 0,
       mode: save.mode === "creative" ? "creative" : "survival",
       lives: PLAYER_MAX_LIVES,
@@ -2484,11 +2500,11 @@ function resetGame() {
 }
 
 function spinWheel() {
-  if (state.stars < 7777) {
+  if (!state.authorMode && state.stars < 7777) {
     announce("星星不够抽奖");
     return;
   }
-  state.stars -= 7777;
+  if (!state.authorMode) state.stars -= 7777;
   const roll = Math.random();
   if (roll < 0.001) {
     state.inventory.lamp += 10;
@@ -2502,8 +2518,8 @@ function spinWheel() {
       state.ownedSkins[lockedSkin] = true;
       announce(`抽到 ${SHOP_SKINS[lockedSkin].name}`);
     } else {
-      state.stars += 1;
-      announce("重复奖励转成 1 星星");
+      if (!state.authorMode) state.stars += 1;
+      announce(state.authorMode ? "作者模式：重复奖励不扣星星" : "重复奖励转成 1 星星");
     }
   }
   renderShop();
