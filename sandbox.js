@@ -9,6 +9,7 @@ const starValue = document.getElementById("starValue");
 const coordValue = document.getElementById("coordValue");
 const targetValue = document.getElementById("targetValue");
 const fpsValue = document.getElementById("fpsValue");
+const statusValue = document.getElementById("statusValue");
 const weaponValue = document.getElementById("weaponValue");
 const cameraValue = document.getElementById("cameraValue");
 const bossValue = document.getElementById("bossValue");
@@ -39,7 +40,7 @@ const AUTHOR_ENABLED = URL_PARAMS.has("author");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
 const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
-const RENDER_RADIUS = 14;
+const RENDER_RADIUS = 11;
 const RENDER_REFRESH_DISTANCE = 6;
 const PLAYER_MAX_LIVES = 100;
 const PLAYER_MAX_SHIELDS = 3;
@@ -52,11 +53,14 @@ const CREATIVE_INTERACT_RANGE = 18;
 const GRAPPLE_RANGE = 46;
 const GRAPPLE_PULL = 34;
 const HOOK_SPEED = 88;
-const ENEMY_ACTIVE_RADIUS = 90;
-const TITAN_ACTIVE_RADIUS = 160;
+const ENEMY_ACTIVE_RADIUS = 78;
+const TITAN_ACTIVE_RADIUS = 132;
 const EPIC_EFFECT_MULTIPLIER = 2;
 const MAX_PARTICLES = 360;
 const MINIMAP_REFRESH_INTERVAL = 0.45;
+const CITY_CULL_INTERVAL = 0.42;
+const CITY_VISIBLE_RADIUS = 205;
+const CITY_VISIBLE_RADIUS_SQ = CITY_VISIBLE_RADIUS * CITY_VISIBLE_RADIUS;
 const TARGET_FPS = 60;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
@@ -229,6 +233,7 @@ const volcanoes = [];
 const blockMeshes = new THREE.Group();
 const cityGroup = new THREE.Group();
 const structureColliders = [];
+const grappleSurfaceObjects = [];
 const enemies = [];
 const projectiles = [];
 const particles = [];
@@ -237,6 +242,7 @@ let boss = null;
 let lastRenderCenter = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
 let minimapTimer = 0;
 let uiTimer = 0;
+let cityCullTimer = 0;
 
 scene.add(blockMeshes);
 scene.add(cityGroup);
@@ -279,6 +285,7 @@ const player = {
   velocity: new THREE.Vector3(),
   group: new THREE.Group(),
   speed: 6,
+  grounded: false,
   grappleTarget: null,
   grappleHook: null,
   grappleTimer: 0,
@@ -334,6 +341,7 @@ function exposeQaHooks() {
       playerY: Number(player.position.y.toFixed(3)),
       playerZ: Number(player.position.z.toFixed(3)),
       volcanoCount: volcanoes.length,
+      buildingCount: structureColliders.length,
       enemyCount: enemies.filter((enemy) => !enemy.defeated).length,
       titanCount: enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length,
       fps: Number(fpsAverage.toFixed(1)),
@@ -357,6 +365,7 @@ function updateQaDebug() {
   document.body.dataset.playerZ = player.position.z.toFixed(3);
   document.body.dataset.mode = state.mode;
   document.body.dataset.volcanoCount = String(volcanoes.length);
+  document.body.dataset.buildingCount = String(structureColliders.length);
   document.body.dataset.enemyCount = String(enemies.filter((enemy) => !enemy.defeated).length);
   document.body.dataset.titanCount = String(enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length);
   document.body.dataset.fps = fpsAverage.toFixed(1);
@@ -448,30 +457,90 @@ function setupWalledCity() {
 
   const stone = new THREE.MeshStandardMaterial({ color: 0xb8afa3, roughness: 0.68 });
   const plaster = new THREE.MeshStandardMaterial({ color: 0xd7c7ac, roughness: 0.72 });
+  const brick = new THREE.MeshStandardMaterial({ color: 0xa77b62, roughness: 0.7 });
   const roof = new THREE.MeshStandardMaterial({ color: 0x6b2f2b, roughness: 0.58 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x8fb3be, emissive: 0x1f3e45, emissiveIntensity: 0.08, roughness: 0.35 });
-  for (let i = 0; i < 54; i += 1) {
-    const angle = i * 2.17;
-    const district = 42 + (i % 9) * 18 + Math.floor(i / 9) * 16;
-    const x = Math.round(Math.cos(angle) * district + seededNoise(i, 803) * 12 - 6);
-    const z = Math.round(Math.sin(angle) * district + seededNoise(i, 907) * 12 - 6);
-    const w = 7 + Math.floor(seededNoise(i, 111) * 5);
-    const d = 7 + Math.floor(seededNoise(i, 211) * 6);
-    const h = 16 + Math.floor(seededNoise(i, 311) * 28);
-    const y = getGroundY(x, z);
-    const body = addStructureBox(w, h, d, i % 3 === 0 ? stone : plaster, x, y + h / 2, z, true);
-    body.userData.kind = "building";
-    const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 5.5, 4), roof);
-    roofMesh.position.set(x, y + h + 2.7, z);
-    roofMesh.rotation.y = Math.PI / 4;
-    roofMesh.castShadow = false;
-    roofMesh.receiveShadow = true;
-    cityGroup.add(roofMesh);
-    for (let floor = 0; floor < Math.min(7, Math.floor(h / 4)); floor += 1) {
-      const wy = y + 3 + floor * 4;
-      addWindowStrip(x, wy, z - d / 2 - 0.04, w * 0.72, glass, 0);
-      addWindowStrip(x, wy, z + d / 2 + 0.04, w * 0.72, glass, 0);
-    }
+
+  generateCityDistrict({
+    count: 230,
+    radiusMin: 34,
+    radiusMax: HALF_WORLD * 0.48,
+    minSize: 8,
+    maxSize: 17,
+    minHeight: 30,
+    maxHeight: 82,
+    highRise: true,
+    materials: [stone, plaster, brick],
+    roof,
+    glass,
+  });
+  generateCityDistrict({
+    count: 92,
+    radiusMin: HALF_WORLD * 0.53,
+    radiusMax: HALF_WORLD - 170,
+    minSize: 6,
+    maxSize: 12,
+    minHeight: 7,
+    maxHeight: 18,
+    highRise: false,
+    materials: [plaster, brick],
+    roof,
+    glass,
+  });
+}
+
+function generateCityDistrict(config) {
+  const {
+    count,
+    radiusMin,
+    radiusMax,
+    minSize,
+    maxSize,
+    minHeight,
+    maxHeight,
+    highRise,
+    materials,
+    roof,
+    glass,
+  } = config;
+  for (let i = 0; i < count; i += 1) {
+    const seed = i + (highRise ? 1300 : 2300);
+    const angle = seed * 2.399963;
+    const distance = radiusMin + seededNoise(seed, 19) * (radiusMax - radiusMin);
+    const x = Math.round(Math.cos(angle) * distance + seededNoise(seed, 803) * 20 - 10);
+    const z = Math.round(Math.sin(angle) * distance + seededNoise(seed, 907) * 20 - 10);
+    if (Math.hypot(x, z) < 28) continue;
+    const w = minSize + Math.floor(seededNoise(seed, 111) * (maxSize - minSize + 1));
+    const d = minSize + Math.floor(seededNoise(seed, 211) * (maxSize - minSize + 1));
+    const h = minHeight + Math.floor(seededNoise(seed, 311) * (maxHeight - minHeight + 1));
+    addEuropeanBuilding(x, z, w, d, h, highRise, materials[seed % materials.length], roof, glass, seed);
+  }
+}
+
+function addEuropeanBuilding(x, z, w, d, h, highRise, wallMaterial, roofMaterial, glassMaterial, seed) {
+  const y = getGroundY(x, z);
+  const body = addStructureBox(w, h, d, wallMaterial, x, y + h / 2, z, true);
+  body.userData.kind = highRise ? "centralHighRise" : "outerHouse";
+  const roofHeight = highRise ? 4.5 : 3.8;
+  const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, roofHeight, 4), roofMaterial);
+  roofMesh.position.set(x, y + h + roofHeight / 2, z);
+  roofMesh.rotation.y = Math.PI / 4 + seededNoise(seed, 411) * 0.24;
+  roofMesh.castShadow = false;
+  roofMesh.receiveShadow = true;
+  registerCityVisual(roofMesh, x, z, true);
+  cityGroup.add(roofMesh);
+  grappleSurfaceObjects.push(roofMesh);
+
+  const floorStep = highRise ? 7 : 5;
+  const floors = Math.min(highRise ? 8 : 3, Math.floor(h / floorStep));
+  for (let floor = 0; floor < floors; floor += 1) {
+    const wy = y + 3 + floor * floorStep;
+    addWindowStrip(x, wy, z - d / 2 - 0.04, w * 0.64, glassMaterial, 0);
+    if (floor % 2 === 0) addWindowStrip(x, wy, z + d / 2 + 0.04, w * 0.64, glassMaterial, 0);
+  }
+  if (highRise && seed % 5 === 0) {
+    const tower = addStructureBox(w * 0.46, h * 0.42, d * 0.46, wallMaterial, x, y + h + h * 0.21, z, true);
+    tower.userData.kind = "roofTower";
   }
 }
 
@@ -480,8 +549,10 @@ function addStructureBox(w, h, d, material, x, y, z, collides) {
   mesh.position.set(x, y, z);
   mesh.castShadow = false;
   mesh.receiveShadow = true;
+  registerCityVisual(mesh, x, z, Math.max(w, d) < 300);
   cityGroup.add(mesh);
   if (collides) addStructureCollider(x, y, z, w, h, d);
+  if (collides) grappleSurfaceObjects.push(mesh);
   return mesh;
 }
 
@@ -490,7 +561,14 @@ function addWindowStrip(x, y, z, w, material, rotationY) {
   mesh.position.set(x, y, z);
   mesh.rotation.y = rotationY;
   mesh.castShadow = false;
+  registerCityVisual(mesh, x, z, true);
   cityGroup.add(mesh);
+}
+
+function registerCityVisual(mesh, x, z, cullable) {
+  mesh.userData.cityX = x;
+  mesh.userData.cityZ = z;
+  mesh.userData.cityCull = cullable;
 }
 
 function addStructureCollider(x, y, z, w, h, d) {
@@ -1510,6 +1588,7 @@ function update(dt) {
     updateSurvivalCreativeSurge(dt);
     updatePlayer(dt);
     refreshWorldWindow(false);
+    updateCityVisibility(dt);
     updateEnemies(dt);
     updateProjectiles(dt);
     updateItemDrops(dt);
@@ -1555,6 +1634,23 @@ function updateAdaptiveQuality(dt) {
     renderPixelRatio = Math.min(maxRatio, renderPixelRatio + 0.1);
     renderer.setPixelRatio(renderPixelRatio);
     resize();
+  }
+}
+
+function updateCityVisibility(dt) {
+  cityCullTimer -= dt;
+  if (cityCullTimer > 0) return;
+  cityCullTimer = CITY_CULL_INTERVAL;
+  const px = player.position.x;
+  const pz = player.position.z;
+  for (const child of cityGroup.children) {
+    if (!child.userData.cityCull) {
+      child.visible = true;
+      continue;
+    }
+    const dx = child.userData.cityX - px;
+    const dz = child.userData.cityZ - pz;
+    child.visible = dx * dx + dz * dz < CITY_VISIBLE_RADIUS_SQ;
   }
 }
 
@@ -1616,11 +1712,13 @@ function updatePlayer(dt) {
   updateGrappleSystem(dt);
 
   const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
-  if (player.position.y <= groundY + 0.22) {
+  player.grounded = player.position.y <= groundY + 0.34 && player.velocity.y <= 0.8;
+  if (player.grounded) {
     player.position.y = groundY;
     player.velocity.y = Math.max(0, player.velocity.y);
-    if (input.jumpQueued) {
+    if (input.jumpQueued || input.jump) {
       player.velocity.y = state.ownedAbilities.jumpSmash ? 9.4 : JUMP_FORCE;
+      player.grounded = false;
       spawnParticles(player.position.clone().add(new THREE.Vector3(0, 0.12, 0)), 0xf6f2df, 12, 0.36);
     }
   }
@@ -1944,8 +2042,9 @@ function createHookMesh() {
 function getGrappleAim(origin, direction, includeFallback = true) {
   raycaster.set(origin, direction);
   raycaster.far = GRAPPLE_RANGE;
+  const visibleGrappleSurfaces = grappleSurfaceObjects.filter((object) => object.visible);
   const worldHits = raycaster
-    .intersectObjects([...blockMeshes.children, ...cityGroup.children], false)
+    .intersectObjects([...blockMeshes.children, ...visibleGrappleSurfaces], false)
     .filter((hit) => hit.distance <= GRAPPLE_RANGE);
   if (worldHits.length) {
     raycaster.far = Infinity;
@@ -2643,6 +2742,9 @@ function updateUI() {
   shopStars.textContent = starText;
   if (coordValue) coordValue.textContent = formatCoord(player.position);
   if (fpsValue) fpsValue.textContent = Math.max(1, Math.round(fpsAverage)).toString();
+  if (statusValue) {
+    statusValue.textContent = player.grappleHook ? "钩爪飞行" : player.grappleTarget ? "牵引" : player.grounded ? "落地" : "空中";
+  }
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   weaponValue.textContent = state.odmEquipped
     ? "赤风立体机动"
