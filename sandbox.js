@@ -44,8 +44,11 @@ const GRAVITY = 18;
 const JUMP_FORCE = 8.2;
 const INTERACT_RANGE = 8;
 const CREATIVE_INTERACT_RANGE = 18;
-const EPIC_EFFECT_MULTIPLIER = 6;
-const MAX_PARTICLES = 900;
+const GRAPPLE_RANGE = 46;
+const GRAPPLE_PULL = 34;
+const ENEMY_ACTIVE_RADIUS = 180;
+const EPIC_EFFECT_MULTIPLIER = 4;
+const MAX_PARTICLES = 650;
 const MINIMAP_REFRESH_INTERVAL = 0.25;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
@@ -59,6 +62,8 @@ const BLOCKS = {
   stone: { name: "石头", color: 0x7d8790, count: 36 },
   wood: { name: "原木", color: 0x8d5e33, count: 24 },
   lamp: { name: "灯", color: 0xf0c64a, count: 12 },
+  volcanicRed: { name: "赤火山岩", color: 0x8b1f1a, count: 0 },
+  volcanicAsh: { name: "灰火山岩", color: 0x4b4742, count: 0 },
 };
 
 const SHOP_SKINS = {
@@ -157,6 +162,7 @@ const SHOP_ABILITIES = {
   jumpSmash: { name: "Jump Smash Ability", price: 10000, label: "空中重击", color: 0xf0c64a },
   pigCompanion: { name: "Pig Pistol Companion", price: 10000, label: "Q 切伙伴，E 开火", color: 0xff9fbe },
   bareHands: { name: "Bare Hands Sprint", price: 30000, label: "徒手冲刺", color: 0x8ee5ff },
+  odmGear: { name: "赤风立体机动装置", price: 0, label: "J 穿戴，左键钩爪移动", color: 0x9b111e },
 };
 
 const TOOL_SLOTS = [
@@ -230,17 +236,19 @@ const state = {
   equippedRacket: "starter",
   equippedAbility: "none",
   shoesOn: false,
+  odmEquipped: false,
   weaponMode: "racket",
   cameraMode: "third",
   inventory: Object.fromEntries(Object.entries(BLOCKS).map(([id, item]) => [id, item.count])),
   ownedSkins: { bear: true },
   ownedRackets: { starter: true },
-  ownedAbilities: { pigCompanion: true },
+  ownedAbilities: { pigCompanion: true, odmGear: true },
   yaw: 0,
   pitch: -0.38,
   messageTimer: 0,
   attackCooldown: 0,
   shotCooldown: 0,
+  grappleCooldown: 0,
   invulnerable: 0,
   survivalCreativeSurge: 0,
   creativeRollTimer: 20,
@@ -252,6 +260,8 @@ const player = {
   velocity: new THREE.Vector3(),
   group: new THREE.Group(),
   speed: 6,
+  grappleTarget: null,
+  grappleTimer: 0,
 };
 
 const input = {
@@ -405,13 +415,19 @@ function refreshWorldWindow(force = false) {
 
 function addNaturalColumn(x, z) {
   const height = terrainHeight(x, z);
+  const volcano = getVolcanoAt(x, z);
   for (let y = 0; y <= height; y += 1) {
     const key = keyFor(x, y, z);
     if (minedBlockKeys.has(key)) continue;
-    const volcano = getVolcanoAt(x, z);
-    const type = volcano && y >= height - 1 ? "stone" : y === height ? "grass" : y > height - 2 ? "dirt" : "stone";
+    const type = volcano && y >= height - 1 ? getVolcanoSurfaceType(x, z, volcano) : y === height ? "grass" : y > height - 2 ? "dirt" : "stone";
     addBlock(x, y, z, type, false, true, false);
   }
+}
+
+function getVolcanoSurfaceType(x, z, volcano) {
+  const angle = Math.atan2(z - volcano.z, x - volcano.x);
+  const seam = Math.sin(angle * 1.8 + volcano.x * 0.01) + seededNoise(x * 9, z * 7) * 0.45;
+  return seam > 0 ? "volcanicRed" : "volcanicAsh";
 }
 
 function addAtmosphereDetails() {
@@ -634,6 +650,8 @@ function rebuildPlayerModel() {
     player.group.add(box(0.1, 0.52, 0.14, mat(0xd9343e), 0.36, 0.74, 0));
   }
 
+  if (state.odmEquipped) addOdmGearModel();
+
   const racket = SHOP_RACKETS[state.equippedRacket] || SHOP_RACKETS.starter;
   const racketGroup = new THREE.Group();
   racketGroup.name = "racket";
@@ -670,7 +688,7 @@ function rebuildPlayerModel() {
     strings.add(lineA, lineB);
   }
   racketGroup.add(handle, shaft, frame, frameGlow, strings);
-  player.group.add(racketGroup);
+  if (!state.odmEquipped) player.group.add(racketGroup);
 
   if (state.weaponMode === "pistol") {
     player.group.add(box(0.34, 0.12, 0.16, mat(0x26303a), 0.64, 0.9, -0.42));
@@ -684,6 +702,34 @@ function rebuildPlayerModel() {
       player.group.add(pig);
     }
   }
+}
+
+function addOdmGearModel() {
+  const gear = new THREE.Group();
+  gear.name = "odmGear";
+  const metal = mat(0x2a2f35, 0.32, 0.38);
+  const red = new THREE.MeshStandardMaterial({
+    color: 0x6f0710,
+    emissive: 0xb70d19,
+    emissiveIntensity: 0.9,
+    roughness: 0.28,
+    metalness: 0.18,
+  });
+  const leftCanister = cyl(0.08, 0.08, 0.52, metal, -0.42, 0.68, -0.05);
+  const rightCanister = cyl(0.08, 0.08, 0.52, metal, 0.42, 0.68, -0.05);
+  leftCanister.rotation.z = Math.PI / 2;
+  rightCanister.rotation.z = Math.PI / 2;
+  const leftBladeBox = box(0.12, 0.16, 0.58, red, -0.52, 0.6, -0.24);
+  const rightBladeBox = box(0.12, 0.16, 0.58, red, 0.52, 0.6, -0.24);
+  const waistCore = box(0.78, 0.14, 0.18, metal, 0, 0.68, -0.12);
+  const leftHook = box(0.08, 0.08, 0.34, red, -0.62, 0.72, -0.46);
+  const rightHook = box(0.08, 0.08, 0.34, red, 0.62, 0.72, -0.46);
+  const cableL = cyl(0.012, 0.012, 0.72, mat(0x1a1718, 0.4, 0.4), -0.36, 0.88, -0.24);
+  const cableR = cyl(0.012, 0.012, 0.72, mat(0x1a1718, 0.4, 0.4), 0.36, 0.88, -0.24);
+  cableL.rotation.x = 1.1;
+  cableR.rotation.x = 1.1;
+  gear.add(waistCore, leftCanister, rightCanister, leftBladeBox, rightBladeBox, leftHook, rightHook, cableL, cableR);
+  player.group.add(gear);
 }
 
 function box(w, h, d, material, x, y, z) {
@@ -735,6 +781,21 @@ function setupEnemies() {
     ["turret", -28, -22],
   ];
 
+  for (let i = 0; i < 42; i += 1) {
+    const angle = i * 2.399;
+    const ring = 44 + (i % 7) * 28 + Math.floor(i / 7) * 18;
+    const x = Math.round(Math.cos(angle) * ring + seededNoise(i, 401) * 18 - 9);
+    const z = Math.round(Math.sin(angle) * ring + seededNoise(i, 503) * 18 - 9);
+    monsterSpawns.push([i % 4 === 0 ? "racketMonster" : "zombie", x, z]);
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    const angle = (i / 8) * Math.PI * 2 + 0.4;
+    const x = Math.round(Math.cos(angle) * (90 + i * 17));
+    const z = Math.round(Math.sin(angle) * (90 + i * 17));
+    monsterSpawns.push(["turret", x, z]);
+  }
+
   for (const [type, x, z] of monsterSpawns) {
     spawnEnemy(type, x, z);
   }
@@ -743,6 +804,10 @@ function setupEnemies() {
   boss.active = false;
   spawnEnemy("zombieBoss", -31, 28).active = false;
   spawnEnemy("gundamBoss", 31, -31).active = false;
+  spawnEnemy("lavaBoss", 95, 86).active = false;
+  spawnEnemy("shadowBoss", -104, 92).active = false;
+  spawnEnemy("rabbitBoss", 132, -118).active = false;
+  spawnEnemy("zombieBoss", -142, -126).active = false;
 }
 
 function spawnEnemy(type, x, z) {
@@ -752,10 +817,10 @@ function spawnEnemy(type, x, z) {
     name: getEnemyName(type),
     position: new THREE.Vector3(x, highestBlockY(Math.round(x), Math.round(z)), z),
     velocity: new THREE.Vector3(),
-    hp: isBoss ? (type === "gundamBoss" ? 180 : 130) : type === "turret" ? 28 : 22,
-    maxHp: isBoss ? (type === "gundamBoss" ? 180 : 130) : type === "turret" ? 28 : 22,
-    damage: isBoss ? 8 : type === "turret" ? 4 : 3,
-    speed: type === "zombie" ? 2.2 : type === "racketMonster" ? 2.7 : type === "turret" ? 0 : 1.8,
+    hp: isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
+    maxHp: isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
+    damage: isBoss ? (type === "lavaBoss" ? 10 : 8) : type === "turret" ? 4 : 3,
+    speed: type === "zombie" ? 2.2 : type === "racketMonster" ? 2.7 : type === "turret" ? 0 : type === "shadowBoss" ? 2.4 : 1.8,
     cooldown: 1 + Math.random(),
     invulnerable: 0,
     active: true,
@@ -768,6 +833,16 @@ function spawnEnemy(type, x, z) {
   return enemy;
 }
 
+function getBossHp(type) {
+  return {
+    rabbitBoss: 130,
+    zombieBoss: 145,
+    gundamBoss: 180,
+    lavaBoss: 170,
+    shadowBoss: 155,
+  }[type] || 130;
+}
+
 function getEnemyName(type) {
   return {
     zombie: "毒雾僵尸怪",
@@ -776,6 +851,8 @@ function getEnemyName(type) {
     rabbitBoss: "Rabbit Boss",
     zombieBoss: "Zombie Boss",
     gundamBoss: "Gundam Mech Boss",
+    lavaBoss: "Deep Red Volcano Boss",
+    shadowBoss: "Shadow Hook Boss",
   }[type];
 }
 
@@ -825,6 +902,31 @@ function createEnemyModel(type) {
     group.add(sphere(0.08, eyeMat, 0.22, 2.24, -0.52));
     group.add(box(1.72, 0.18, 0.18, mat(0x1f3f3b, 0.5), 0, 1.48, -0.48));
     group.add(ellipsoid(0.22, 0.12, 0.08, mat(0xff6f72, 0.35, 0.08), 0, 2.03, -0.57));
+  } else if (type === "lavaBoss") {
+    const lavaMat = new THREE.MeshStandardMaterial({
+      color: 0x5a0008,
+      emissive: 0xb60d16,
+      emissiveIntensity: 1.15,
+      roughness: 0.34,
+      metalness: 0.12,
+    });
+    group.add(ellipsoid(0.78, 1.04, 0.58, lavaMat, 0, 1.14, 0));
+    group.add(ellipsoid(0.64, 0.62, 0.54, mat(0x4b4742, 0.44), 0, 2.18, 0));
+    group.add(sphere(0.09, mat(0xff2a2a, 0.22, 0.12), -0.22, 2.25, -0.5));
+    group.add(sphere(0.09, mat(0xff2a2a, 0.22, 0.12), 0.22, 2.25, -0.5));
+    group.add(cyl(0.12, 0.28, 1.1, lavaMat, -0.68, 1.45, -0.05));
+    group.add(cyl(0.12, 0.28, 1.1, lavaMat, 0.68, 1.45, -0.05));
+    group.add(new THREE.PointLight(0x8b000c, 3.2, 8));
+  } else if (type === "shadowBoss") {
+    group.add(ellipsoid(0.72, 1.0, 0.56, mat(0x16171c, 0.38, 0.18), 0, 1.08, 0));
+    group.add(ellipsoid(0.62, 0.58, 0.52, mat(0x25222b, 0.34, 0.2), 0, 2.08, 0));
+    group.add(sphere(0.08, mat(0xb40f1c, 0.24, 0.15), -0.2, 2.15, -0.5));
+    group.add(sphere(0.08, mat(0xb40f1c, 0.24, 0.15), 0.2, 2.15, -0.5));
+    const hookL = box(0.08, 0.08, 1.35, mat(0x9b111e, 0.28, 0.28), -0.72, 1.36, -0.46);
+    const hookR = box(0.08, 0.08, 1.35, mat(0x9b111e, 0.28, 0.28), 0.72, 1.36, -0.46);
+    hookL.rotation.y = -0.25;
+    hookR.rotation.y = 0.25;
+    group.add(hookL, hookR);
   } else {
     group.add(ellipsoid(0.82, 1.05, 0.62, mat(0xe8eef4, 0.35, 0.25), 0, 1.1, 0));
     group.add(box(1.18, 0.78, 1.08, mat(0x17438d, 0.34, 0.22), 0, 2.28, 0));
@@ -984,6 +1086,11 @@ function onKey(event, pressed) {
     const index = Number(event.code.replace("Digit", "")) - 1;
     if (index >= 0 && index < TOOL_SLOTS.length) selectSlot(index);
   } else if (pressed && event.code === "KeyQ") {
+    if (state.odmEquipped) {
+      announce("立体机动装置使用中，球拍已收回");
+      event.preventDefault();
+      return;
+    }
     state.ownedAbilities.pigCompanion = true;
     state.weaponMode = state.weaponMode === "pistol" ? "racket" : "pistol";
     state.selectedSlot = state.weaponMode === "pistol" ? 1 : 0;
@@ -997,6 +1104,8 @@ function onKey(event, pressed) {
     toggleCameraMode();
   } else if (pressed && event.code === "KeyL") {
     teleportToNearestVolcano();
+  } else if (pressed && event.code === "KeyJ") {
+    toggleOdmGear();
   } else if (pressed && event.code === "KeyG") {
     announce("Forehand Drive / Backhand Smash / Drop Shot");
   } else if (pressed && event.code === "KeyI") {
@@ -1078,6 +1187,23 @@ function teleportToNearestVolcano() {
   announce("已传送到最近的火山");
 }
 
+function toggleOdmGear() {
+  state.ownedAbilities.odmGear = true;
+  state.odmEquipped = !state.odmEquipped;
+  player.grappleTarget = null;
+  player.grappleTimer = 0;
+  if (state.odmEquipped) {
+    state.weaponMode = "odm";
+    state.selectedSlot = 0;
+    announce("赤风立体机动装置已穿戴：左键钩爪移动，球拍已收回");
+  } else {
+    state.weaponMode = "racket";
+    announce("立体机动装置已脱下，球拍恢复");
+  }
+  rebuildPlayerModel();
+  updateUI();
+}
+
 function requestMouseLock() {
   try {
     const lock = canvas.requestPointerLock?.();
@@ -1106,6 +1232,7 @@ function update(dt) {
   }
   state.attackCooldown = Math.max(0, state.attackCooldown - dt);
   state.shotCooldown = Math.max(0, state.shotCooldown - dt);
+  state.grappleCooldown = Math.max(0, state.grappleCooldown - dt);
   state.invulnerable = Math.max(0, state.invulnerable - dt);
   updateParticles(dt);
   updateCamera();
@@ -1151,6 +1278,7 @@ function updatePlayer(dt) {
   player.velocity.x = move.x * player.speed * speedBoost * sprintBoost * modeBoost;
   player.velocity.z = move.z * player.speed * speedBoost * sprintBoost * modeBoost;
   player.velocity.y -= GRAVITY * dt;
+  updateGrapplePull(dt);
 
   const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
   if (player.position.y <= groundY + 0.22) {
@@ -1168,6 +1296,23 @@ function updatePlayer(dt) {
   player.position.z = THREE.MathUtils.clamp(player.position.z, -HALF_WORLD + 1, HALF_WORLD - 1);
   player.group.position.copy(player.position);
   player.group.rotation.y = state.yaw + Math.PI;
+}
+
+function updateGrapplePull(dt) {
+  if (!state.odmEquipped || !player.grappleTarget) return;
+  player.grappleTimer = Math.max(0, player.grappleTimer - dt);
+  const hookPoint = player.position.clone().add(new THREE.Vector3(0, 1.05, 0));
+  const toTarget = player.grappleTarget.clone().sub(hookPoint);
+  const distance = toTarget.length();
+  if (distance < 2.2 || player.grappleTimer <= 0) {
+    player.grappleTarget = null;
+    return;
+  }
+  const pull = toTarget.normalize().multiplyScalar(GRAPPLE_PULL);
+  player.velocity.x += pull.x;
+  player.velocity.y = Math.max(player.velocity.y, pull.y * 0.72 + 5.5);
+  player.velocity.z += pull.z;
+  spawnParticles(hookPoint, 0x9b111e, 4, 1.2, "bloodWind");
 }
 
 function movePlayerWithCollision(dt) {
@@ -1243,6 +1388,7 @@ function getGroundY(x, z) {
 
 function updateEnemies(dt) {
   const activeBoss = getActiveBoss();
+  const now = performance.now();
   for (const enemy of enemies) {
     if (enemy.defeated) continue;
     const distance = enemy.position.distanceTo(player.position);
@@ -1252,6 +1398,11 @@ function updateEnemies(dt) {
       announce(`${enemy.name} 出现`);
     }
     if (!enemy.active) continue;
+    if (!enemy.type.includes("Boss") && distance > ENEMY_ACTIVE_RADIUS) {
+      enemy.group.visible = false;
+      continue;
+    }
+    enemy.group.visible = true;
 
     enemy.invulnerable = Math.max(0, enemy.invulnerable - dt);
     enemy.cooldown -= dt;
@@ -1278,8 +1429,8 @@ function updateEnemies(dt) {
     }
 
     enemy.group.position.copy(enemy.position);
-    enemy.group.position.y += Math.sin(performance.now() / 230 + enemy.position.x) * (enemy.type.includes("Boss") ? 0.045 : 0.035);
-    enemy.group.rotation.z = Math.sin(performance.now() / 280 + enemy.position.z) * (enemy.type === "turret" ? 0 : 0.035);
+    enemy.group.position.y += Math.sin(now / 230 + enemy.position.x) * (enemy.type.includes("Boss") ? 0.045 : 0.035);
+    enemy.group.rotation.z = Math.sin(now / 280 + enemy.position.z) * (enemy.type === "turret" ? 0 : 0.035);
   }
   if (!activeBoss && boss && boss.defeated) boss = null;
 }
@@ -1319,6 +1470,10 @@ function getActiveBoss() {
 }
 
 function useSelectedTool() {
+  if (state.odmEquipped) {
+    useGrappleHook();
+    return;
+  }
   const slot = TOOL_SLOTS[state.selectedSlot];
   if (slot.type === "weapon") {
     if (slot.id === "pistol") fireProjectile(false);
@@ -1330,7 +1485,48 @@ function useSelectedTool() {
   }
 }
 
+function useGrappleHook() {
+  if (!state.odmEquipped || state.grappleCooldown > 0) return;
+  state.grappleCooldown = 0.16;
+  state.weaponMode = "odm";
+  const hit = raycastBlock();
+  const origin = player.position.clone().add(new THREE.Vector3(0, 1.05, 0));
+  const direction = getLookDirection();
+  const target =
+    hit && hit.distance <= GRAPPLE_RANGE
+      ? hit.point.clone()
+      : origin.clone().addScaledVector(direction, GRAPPLE_RANGE * 0.72);
+  player.grappleTarget = target;
+  player.grappleTimer = 1.15;
+  const pull = target.clone().sub(origin).normalize().multiplyScalar(16);
+  player.velocity.add(pull);
+  spawnGrappleLine(origin, target);
+  spawnParticles(origin.clone().addScaledVector(direction, 0.6), 0x9b111e, 28, 2.8, "bloodWind");
+}
+
+function spawnGrappleLine(origin, target) {
+  const geometry = new THREE.BufferGeometry().setFromPoints([origin, target]);
+  const line = new THREE.Line(
+    geometry,
+    new THREE.LineBasicMaterial({
+      color: 0xb40f1c,
+      transparent: true,
+      opacity: 0.82,
+    }),
+  );
+  scene.add(line);
+  particles.push({
+    mesh: line,
+    velocity: new THREE.Vector3(),
+    life: 0.22,
+  });
+}
+
 function meleeAttack() {
+  if (state.odmEquipped) {
+    useGrappleHook();
+    return;
+  }
   const racket = SHOP_RACKETS[state.equippedRacket] || SHOP_RACKETS.starter;
   if (state.attackCooldown > 0) return;
   state.attackCooldown = racket.cooldown;
@@ -1549,27 +1745,29 @@ function eruptVolcano(volcano) {
   const origin = new THREE.Vector3(volcano.x, craterY, volcano.z);
   const distanceToPlayer = origin.distanceTo(player.position);
   if (distanceToPlayer > 240) return;
-  spawnParticles(origin, 0xff3b1f, 95, 5.2, "lava");
+  spawnParticles(origin, 0x5a0008, 130, 6.2, "deepFire");
   spawnParticles(origin.clone().add(new THREE.Vector3(0, 2.2, 0)), 0x3a332d, 90, 2.8, "ash");
-  spawnParticles(origin.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xffd166, 75, 4.4, "lava");
+  spawnParticles(origin.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xb60d16, 96, 5.2, "deepFire");
   const plume = new THREE.Mesh(
     new THREE.CylinderGeometry(0.35, volcano.radius * 0.34, 7.5, 20, 1, true),
     new THREE.MeshStandardMaterial({
-      color: 0xff5a1f,
-      emissive: 0xff2e12,
-      emissiveIntensity: 1.65,
+      color: 0x5a0008,
+      emissive: 0x8b000c,
+      emissiveIntensity: 2.8,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.58,
       roughness: 0.2,
     }),
   );
   plume.position.copy(origin).add(new THREE.Vector3(0, 3.5, 0));
+  plume.add(new THREE.PointLight(0x8b000c, 5.2, 22));
   scene.add(plume);
   particles.push({
     mesh: plume,
     velocity: new THREE.Vector3(0, 1.2, 0),
     life: 0.7,
   });
+  burnVolcanoSurroundings(volcano, origin);
 
   const toPlayer = player.position.clone().add(new THREE.Vector3(0, 1.1, 0)).sub(origin);
   const nearPlayer = toPlayer.length() < 180;
@@ -1594,6 +1792,42 @@ function eruptVolcano(volcano) {
     scene.add(mesh);
   }
   announce("火山喷发！");
+}
+
+function burnVolcanoSurroundings(volcano, origin) {
+  const burnRadius = volcano.radius + 13;
+  const playerDistance = Math.hypot(player.position.x - volcano.x, player.position.z - volcano.z);
+  if (playerDistance < burnRadius) {
+    state.lavaBurn = LAVA_BURN_DURATION;
+    hurtPlayer(4, "深红火焰");
+    spawnParticles(player.position.clone().add(new THREE.Vector3(0, 1.0, 0)), 0x5a0008, 55, 3.4, "deepFire");
+  }
+
+  for (const enemy of enemies) {
+    if (!enemy.active || enemy.defeated || enemy.invulnerable > 0) continue;
+    const distance = Math.hypot(enemy.position.x - volcano.x, enemy.position.z - volcano.z);
+    if (distance < burnRadius + (enemy.type.includes("Boss") ? 6 : 2)) {
+      damageEnemy(enemy, enemy.type.includes("Boss") ? 10 : 16, "火山灼烧");
+      spawnParticles(enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x5a0008, 36, 3.2, "deepFire");
+    }
+  }
+
+  for (const drop of itemDrops) {
+    if (Math.hypot(drop.mesh.position.x - volcano.x, drop.mesh.position.z - volcano.z) < burnRadius) {
+      drop.life = 0;
+      spawnParticles(drop.mesh.position, 0x5a0008, 16, 2.4, "deepFire");
+    }
+  }
+
+  for (const mesh of blocks.values()) {
+    const { x, y, z, type } = mesh.userData;
+    if (y < 1 || y > origin.y + 2) continue;
+    const distance = Math.hypot(x - volcano.x, z - volcano.z);
+    if (distance > burnRadius || Math.random() > 0.28) continue;
+    const burnedType = type === "wood" || type === "grass" || type === "lamp" ? "volcanicAsh" : "volcanicRed";
+    mesh.userData.type = burnedType;
+    mesh.material = getBlockMaterial(burnedType);
+  }
 }
 
 function damageEnemy(enemy, amount, label) {
@@ -1744,16 +1978,20 @@ function spawnParticles(position, color, count = 14, force = 1, style = "spark")
   for (let i = 0; i < total; i += 1) {
     const isAsh = style === "ash";
     const isTeleport = style === "teleport";
-    const size = (isAsh ? 0.075 : isTeleport ? 0.055 : 0.06) + Math.random() * (isAsh ? 0.16 : 0.12);
+    const isDeepFire = style === "deepFire";
+    const isBloodWind = style === "bloodWind";
+    const size =
+      (isAsh ? 0.075 : isTeleport ? 0.055 : isDeepFire ? 0.09 : isBloodWind ? 0.045 : 0.06) +
+      Math.random() * (isAsh ? 0.16 : isDeepFire ? 0.2 : 0.12);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(size, size, size),
       new THREE.MeshStandardMaterial({
-        color: isAsh ? 0x2f2a25 : color,
-        emissive: isAsh ? 0x7a2b18 : color,
-        emissiveIntensity: isAsh ? 0.08 : isTeleport ? 0.9 : 0.42,
-        roughness: isAsh ? 0.88 : 0.38,
+        color: isAsh ? 0x2f2a25 : isDeepFire ? 0x5a0008 : isBloodWind ? 0x9b111e : color,
+        emissive: isAsh ? 0x7a2b18 : isDeepFire ? 0xb00016 : color,
+        emissiveIntensity: isAsh ? 0.08 : isDeepFire ? 1.15 : isTeleport ? 0.9 : 0.42,
+        roughness: isAsh ? 0.88 : isBloodWind ? 0.22 : 0.38,
         transparent: true,
-        opacity: isAsh ? 0.72 : 0.92,
+        opacity: isAsh ? 0.72 : isBloodWind ? 0.78 : 0.92,
       }),
     );
     mesh.position.copy(position);
@@ -1761,11 +1999,11 @@ function spawnParticles(position, color, count = 14, force = 1, style = "spark")
     particles.push({
       mesh,
       velocity: new THREE.Vector3(
-        (Math.random() - 0.5) * (isAsh ? 1.8 : 3.8) * boostedForce,
-        (isAsh ? 1.5 : 0.6 + Math.random() * 3.2) * boostedForce,
-        (Math.random() - 0.5) * (isAsh ? 1.8 : 3.8) * boostedForce,
+        (Math.random() - 0.5) * (isAsh ? 1.8 : isBloodWind ? 5.2 : 3.8) * boostedForce,
+        (isAsh ? 1.5 : isDeepFire ? 2.8 + Math.random() * 4.4 : 0.6 + Math.random() * 3.2) * boostedForce,
+        (Math.random() - 0.5) * (isAsh ? 1.8 : isBloodWind ? 5.2 : 3.8) * boostedForce,
       ),
-      life: (isAsh ? 1.2 : 0.38) + Math.random() * (isAsh ? 1.5 : 0.36),
+      life: (isAsh ? 1.2 : isDeepFire ? 0.55 : 0.38) + Math.random() * (isAsh ? 1.5 : isDeepFire ? 0.62 : 0.36),
     });
   }
 }
@@ -1853,7 +2091,11 @@ function updateUI() {
   starValue.textContent = state.stars.toString();
   shopStars.textContent = state.stars.toString();
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
-  weaponValue.textContent = state.weaponMode === "pistol" ? "手枪/伙伴" : SHOP_RACKETS[state.equippedRacket].name;
+  weaponValue.textContent = state.odmEquipped
+    ? "赤风立体机动"
+    : state.weaponMode === "pistol"
+      ? "手枪/伙伴"
+      : SHOP_RACKETS[state.equippedRacket].name;
   if (cameraValue) cameraValue.textContent = state.cameraMode === "first" ? "第一" : "第三";
   const activeBoss = getActiveBoss();
   bossValue.textContent = activeBoss ? activeBoss.name : "未激活";
@@ -1893,6 +2135,7 @@ function saveGame(showMessage) {
     equippedRacket: state.equippedRacket,
     equippedAbility: state.equippedAbility,
     shoesOn: state.shoesOn,
+    odmEquipped: state.odmEquipped,
     weaponMode: state.weaponMode,
     cameraMode: state.cameraMode,
     inventory: state.inventory,
@@ -1924,12 +2167,13 @@ function loadGame() {
       equippedRacket: save.equippedRacket || "starter",
       equippedAbility: save.equippedAbility || "none",
       shoesOn: Boolean(save.shoesOn),
+      odmEquipped: Boolean(save.odmEquipped),
       weaponMode: save.weaponMode || "racket",
       cameraMode: save.cameraMode === "first" ? "first" : "third",
       inventory: { ...state.inventory, ...(save.inventory || {}) },
       ownedSkins: { bear: true, ...(save.ownedSkins || {}) },
       ownedRackets: { starter: true, ...(save.ownedRackets || {}) },
-      ownedAbilities: { pigCompanion: true, ...(save.ownedAbilities || {}) },
+      ownedAbilities: { pigCompanion: true, odmGear: true, ...(save.ownedAbilities || {}) },
     });
     if (Array.isArray(save.player)) player.position.fromArray(save.player);
     if (Array.isArray(save.blocks)) {
