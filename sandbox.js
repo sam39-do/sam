@@ -32,7 +32,7 @@ const spinButton = document.getElementById("spinButton");
 
 const QA_ENABLED = new URLSearchParams(window.location.search).has("qa");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
-const WORLD_SIZE = 1440;
+const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
 const RENDER_RADIUS = 42;
 const RENDER_REFRESH_DISTANCE = 6;
@@ -44,10 +44,12 @@ const GRAVITY = 18;
 const JUMP_FORCE = 8.2;
 const INTERACT_RANGE = 8;
 const CREATIVE_INTERACT_RANGE = 18;
-const EPIC_EFFECT_MULTIPLIER = 10;
+const EPIC_EFFECT_MULTIPLIER = 6;
+const MAX_PARTICLES = 900;
+const MINIMAP_REFRESH_INTERVAL = 0.25;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
-const VOLCANO_COUNT = 12;
+const VOLCANO_COUNT = 9;
 const VOLCANO_ERUPTION_INTERVAL = 20;
 const LAVA_BURN_DURATION = 10;
 const LAVA_BURN_DPS = 0.5;
@@ -60,7 +62,7 @@ const BLOCKS = {
 };
 
 const SHOP_SKINS = {
-  bear: { name: "原皮小熊", price: 0, body: 0xd99058, shirt: 0x3d7893 },
+  bear: { name: "九熊山侠衣", price: 0, body: 0xd99058, shirt: 0x31513b },
   gundam: { name: "经典机甲皮肤", price: 50, body: 0xe8eef4, shirt: 0x17438d },
   homelander: { name: "祖国人风格皮肤", price: 50, body: 0xf0c692, shirt: 0x1f4f99 },
   momota: { name: "桃田贤斗风格皮肤", price: 50, body: 0xe8d0aa, shirt: 0x111827 },
@@ -213,6 +215,7 @@ const projectiles = [];
 const particles = [];
 let boss = null;
 let lastRenderCenter = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+let minimapTimer = 0;
 
 scene.add(blockMeshes);
 
@@ -282,25 +285,44 @@ function init() {
 
 function exposeQaHooks() {
   if (!QA_ENABLED) return;
-  window.__bearSandboxDebug = () => ({
-    mode: state.mode,
-    playerY: Number(player.position.y.toFixed(3)),
-    enemies: enemies
-      .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
-      .slice(0, 6)
-      .map((enemy) => ({
-        type: enemy.type,
-        x: Number(enemy.position.x.toFixed(3)),
-        y: Number(enemy.position.y.toFixed(3)),
-        z: Number(enemy.position.z.toFixed(3)),
-      })),
-  });
+  window.__bearSandboxDebug = (command = "state") => {
+    if (command === "teleport") teleportToNearestVolcano();
+    if (command === "moveVectors") {
+      const forward = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
+      const right = new THREE.Vector3(-Math.cos(state.yaw), 0, Math.sin(state.yaw));
+      return {
+        yaw: Number(state.yaw.toFixed(3)),
+        left: { x: Number((-right.x).toFixed(3)), z: Number((-right.z).toFixed(3)) },
+        right: { x: Number(right.x.toFixed(3)), z: Number(right.z.toFixed(3)) },
+        forward: { x: Number(forward.x.toFixed(3)), z: Number(forward.z.toFixed(3)) },
+      };
+    }
+    return {
+      mode: state.mode,
+      playerX: Number(player.position.x.toFixed(3)),
+      playerY: Number(player.position.y.toFixed(3)),
+      playerZ: Number(player.position.z.toFixed(3)),
+      volcanoCount: volcanoes.length,
+      enemies: enemies
+        .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
+        .slice(0, 6)
+        .map((enemy) => ({
+          type: enemy.type,
+          x: Number(enemy.position.x.toFixed(3)),
+          y: Number(enemy.position.y.toFixed(3)),
+          z: Number(enemy.position.z.toFixed(3)),
+        })),
+    };
+  };
 }
 
 function updateQaDebug() {
   if (!QA_ENABLED) return;
+  document.body.dataset.playerX = player.position.x.toFixed(3);
   document.body.dataset.playerY = player.position.y.toFixed(3);
+  document.body.dataset.playerZ = player.position.z.toFixed(3);
   document.body.dataset.mode = state.mode;
+  document.body.dataset.volcanoCount = String(volcanoes.length);
   document.body.dataset.enemySample = enemies
     .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
     .slice(0, 6)
@@ -568,6 +590,19 @@ function rebuildPlayerModel() {
   const legR = ellipsoid(0.13, 0.28, 0.13, darkMat, 0.18, 0.22, 0);
   const armL = ellipsoid(0.11, 0.34, 0.1, bodyMat, -0.47, 0.88, -0.02);
   const armR = ellipsoid(0.11, 0.34, 0.1, bodyMat, 0.47, 0.88, -0.02);
+  const robe = new THREE.Group();
+  robe.name = "mountainRobe";
+  robe.add(ellipsoid(0.34, 0.5, 0.13, mat(0xe9efe3, 0.48), 0, 0.78, -0.36));
+  robe.add(box(0.62, 0.07, 0.08, mat(0x182f28, 0.42), 0, 0.86, -0.48));
+  robe.add(box(0.09, 0.78, 0.06, mat(0x223c30, 0.42), -0.2, 0.74, -0.49));
+  robe.add(box(0.09, 0.78, 0.06, mat(0x223c30, 0.42), 0.2, 0.74, -0.49));
+  for (let i = 0; i < 3; i += 1) {
+    const ridge = box(0.18 + i * 0.08, 0.018, 0.032, mat(0x6f8b72, 0.5), -0.18 + i * 0.18, 0.58 + i * 0.12, -0.54);
+    ridge.rotation.z = -0.25;
+    robe.add(ridge);
+  }
+  const belt = box(0.68, 0.08, 0.09, mat(0x0f1f1b, 0.35, 0.08), 0, 0.67, -0.03);
+  const sash = box(0.08, 0.62, 0.07, mat(0x8d1f2d, 0.38), 0.28, 0.48, -0.05);
   armR.rotation.z = -0.52;
   armL.rotation.z = 0.26;
   player.group.add(
@@ -588,6 +623,9 @@ function rebuildPlayerModel() {
     legR,
     armL,
     armR,
+    robe,
+    belt,
+    sash,
   );
 
   if (state.equippedSkin === "gundam") {
@@ -957,6 +995,8 @@ function onKey(event, pressed) {
     toggleMode();
   } else if (pressed && event.code === "KeyY") {
     toggleCameraMode();
+  } else if (pressed && event.code === "KeyL") {
+    teleportToNearestVolcano();
   } else if (pressed && event.code === "KeyG") {
     announce("Forehand Drive / Backhand Smash / Drop Shot");
   } else if (pressed && event.code === "KeyI") {
@@ -1015,6 +1055,29 @@ function toggleCameraMode() {
   updateUI();
 }
 
+function teleportToNearestVolcano() {
+  if (!volcanoes.length) return;
+  let nearest = volcanoes[0];
+  let best = Number.POSITIVE_INFINITY;
+  for (const volcano of volcanoes) {
+    const distance = Math.hypot(player.position.x - volcano.x, player.position.z - volcano.z);
+    if (distance < best) {
+      best = distance;
+      nearest = volcano;
+    }
+  }
+  const angle = Math.atan2(player.position.z - nearest.z, player.position.x - nearest.x) || 0;
+  const safeDistance = nearest.radius + 8;
+  const x = Math.round(nearest.x + Math.cos(angle) * safeDistance);
+  const z = Math.round(nearest.z + Math.sin(angle) * safeDistance);
+  spawnParticles(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x8ee5ff, 60, 3.4, "teleport");
+  player.position.set(x, highestBlockY(x, z) + 0.08, z);
+  player.velocity.set(0, 0, 0);
+  refreshWorldWindow(true);
+  spawnParticles(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xf0c64a, 80, 3.8, "teleport");
+  announce("已传送到最近的火山");
+}
+
 function requestMouseLock() {
   try {
     const lock = canvas.requestPointerLock?.();
@@ -1048,7 +1111,11 @@ function update(dt) {
   updateCamera();
   updateUI();
   updateQaDebug();
-  updateMinimap();
+  minimapTimer -= dt;
+  if (minimapTimer <= 0) {
+    minimapTimer = MINIMAP_REFRESH_INTERVAL;
+    updateMinimap();
+  }
   if (state.messageTimer > 0) {
     state.messageTimer -= dt;
     if (state.messageTimer <= 0) messageFeed.classList.remove("is-visible");
@@ -1070,7 +1137,7 @@ function updateSurvivalCreativeSurge(dt) {
 
 function updatePlayer(dt) {
   const forward = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
-  const right = new THREE.Vector3(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
+  const right = new THREE.Vector3(-Math.cos(state.yaw), 0, Math.sin(state.yaw));
   const move = new THREE.Vector3();
   if (input.forward) move.add(forward);
   if (input.backward) move.sub(forward);
@@ -1318,7 +1385,7 @@ function spawnRacketTrail(racket) {
         : racket.trail === "anta"
           ? 0xff3d8b
           : racket.frame2 || racket.color;
-  spawnParticles(origin, color, 220, 5.4);
+  spawnParticles(origin, color, 55, 4.6, "slash");
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(0.62 * (racket.radius || 1), 0.018, 10, 54),
     new THREE.MeshStandardMaterial({
@@ -1482,8 +1549,27 @@ function eruptVolcano(volcano) {
   const origin = new THREE.Vector3(volcano.x, craterY, volcano.z);
   const distanceToPlayer = origin.distanceTo(player.position);
   if (distanceToPlayer > 240) return;
-  spawnParticles(origin, 0xff3b1f, 900, 7);
-  spawnParticles(origin.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xffd166, 520, 5.6);
+  spawnParticles(origin, 0xff3b1f, 95, 5.2, "lava");
+  spawnParticles(origin.clone().add(new THREE.Vector3(0, 2.2, 0)), 0x3a332d, 90, 2.8, "ash");
+  spawnParticles(origin.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xffd166, 75, 4.4, "lava");
+  const plume = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, volcano.radius * 0.34, 7.5, 20, 1, true),
+    new THREE.MeshStandardMaterial({
+      color: 0xff5a1f,
+      emissive: 0xff2e12,
+      emissiveIntensity: 1.65,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.2,
+    }),
+  );
+  plume.position.copy(origin).add(new THREE.Vector3(0, 3.5, 0));
+  scene.add(plume);
+  particles.push({
+    mesh: plume,
+    velocity: new THREE.Vector3(0, 1.2, 0),
+    life: 0.7,
+  });
 
   const toPlayer = player.position.clone().add(new THREE.Vector3(0, 1.1, 0)).sub(origin);
   const nearPlayer = toPlayer.length() < 180;
@@ -1513,7 +1599,7 @@ function eruptVolcano(volcano) {
 function damageEnemy(enemy, amount, label) {
   enemy.hp -= amount;
   enemy.invulnerable = 0.18;
-  spawnParticles(enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff6f72);
+  spawnParticles(enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff6f72, 42, 3.2, "impact");
   announce(`${label} -${amount}`);
   if (enemy.hp <= 0) {
     enemy.defeated = true;
@@ -1648,18 +1734,26 @@ function render() {
   renderer.render(scene, camera);
 }
 
-function spawnParticles(position, color, count = 14, force = 1) {
-  const total = Math.min(1500, Math.max(1, Math.ceil(count * EPIC_EFFECT_MULTIPLIER)));
+function spawnParticles(position, color, count = 14, force = 1, style = "spark") {
+  const total = Math.min(360, Math.max(1, Math.ceil(count * EPIC_EFFECT_MULTIPLIER)));
   const boostedForce = force * 1.8;
+  while (particles.length > MAX_PARTICLES - total) {
+    const old = particles.shift();
+    if (old?.mesh) scene.remove(old.mesh);
+  }
   for (let i = 0; i < total; i += 1) {
-    const size = 0.045 + Math.random() * 0.075;
+    const isAsh = style === "ash";
+    const isTeleport = style === "teleport";
+    const size = (isAsh ? 0.075 : isTeleport ? 0.055 : 0.06) + Math.random() * (isAsh ? 0.16 : 0.12);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(size, size, size),
       new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.18,
-        roughness: 0.52,
+        color: isAsh ? 0x2f2a25 : color,
+        emissive: isAsh ? 0x7a2b18 : color,
+        emissiveIntensity: isAsh ? 0.08 : isTeleport ? 0.9 : 0.42,
+        roughness: isAsh ? 0.88 : 0.38,
+        transparent: true,
+        opacity: isAsh ? 0.72 : 0.92,
       }),
     );
     mesh.position.copy(position);
@@ -1667,11 +1761,11 @@ function spawnParticles(position, color, count = 14, force = 1) {
     particles.push({
       mesh,
       velocity: new THREE.Vector3(
-        (Math.random() - 0.5) * 3.8 * boostedForce,
-        (0.6 + Math.random() * 3.2) * boostedForce,
-        (Math.random() - 0.5) * 3.8 * boostedForce,
+        (Math.random() - 0.5) * (isAsh ? 1.8 : 3.8) * boostedForce,
+        (isAsh ? 1.5 : 0.6 + Math.random() * 3.2) * boostedForce,
+        (Math.random() - 0.5) * (isAsh ? 1.8 : 3.8) * boostedForce,
       ),
-      life: 0.38 + Math.random() * 0.36,
+      life: (isAsh ? 1.2 : 0.38) + Math.random() * (isAsh ? 1.5 : 0.36),
     });
   }
 }
@@ -1705,14 +1799,14 @@ function updateMinimap() {
   minimapCtx.fillStyle = "#153326";
   minimapCtx.fillRect(0, 0, size, size);
 
-  for (let px = 0; px < size; px += 2) {
-    for (let py = 0; py < size; py += 2) {
+  for (let px = 0; px < size; px += 4) {
+    for (let py = 0; py < size; py += 4) {
       const wx = Math.round(player.position.x + ((px / size) * 2 - 1) * halfView);
       const wz = Math.round(player.position.z + ((py / size) * 2 - 1) * halfView);
       const volcano = getVolcanoAt(wx, wz);
       const h = terrainHeight(wx, wz);
       minimapCtx.fillStyle = volcano ? "#75321f" : h > 5 ? "#5f7f57" : "#6ea663";
-      minimapCtx.fillRect(px, py, 2, 2);
+      minimapCtx.fillRect(px, py, 4, 4);
     }
   }
 

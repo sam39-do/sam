@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="小熊 3D 生存沙盒，恢复武器、商店、皮肤、怪兽和 Boss 的立体沙盒游戏。"
+      content="九熊山，古风侠义小熊的 3D 生存沙盒游戏。"
     />
-    <title>小熊 3D 生存沙盒</title>
+    <title>九熊山</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="game-shell">
-      <section class="game-stage" aria-label="小熊 3D 生存沙盒">
+      <section class="game-stage" aria-label="九熊山">
         <canvas id="gameCanvas" aria-label="3D 生存沙盒画面"></canvas>
 
         <header class="top-hud" aria-live="polite">
           <div class="hud-brand">
             <span class="brand-mark" aria-hidden="true"></span>
-            <span>小熊 3D 生存沙盒</span>
+            <span>九熊山</span>
           </div>
           <div class="hud-pill"><span>生命</span><strong id="lifeValue">100</strong></div>
           <div class="hud-pill"><span>护盾</span><strong id="shieldValue">0</strong></div>
@@ -76,14 +76,14 @@
         <div class="message-feed" id="messageFeed" aria-live="polite"></div>
 
         <div class="intro-panel" id="introPanel">
-          <h1>小熊 3D 生存沙盒</h1>
-          <p>旧武器、商店、怪兽和 Boss 已回到生存模式。创造模式保留无限方块和无伤害，但不再飞天。</p>
+          <h1>九熊山</h1>
+          <p>侠衣小熊入山开荒，火山、妖怪、Boss 与方块建造都已归位。</p>
           <p class="load-error" id="loadError">游戏文件没有加载成功。请刷新页面，或用主页链接打开。</p>
-          <button id="playButton" type="button">进入生存模式</button>
+          <button id="playButton" type="button">入山</button>
         </div>
 
         <div class="control-help">
-          WASD 移动 · 鼠标转视角 · 左键攻击/挖掘 · 右键放置 · 1-8 切工具 · C 创造/生存 · Y 第一/第三视角 · Q 切手枪/小猪 · E 射击 · G 换打法 · I 跑鞋
+          WASD 移动 · L 传送最近火山 · 鼠标转视角 · 左键攻击/挖掘 · 右键放置 · 1-8 切工具 · C 创造/生存 · Y 第一/第三视角 · Q 切手枪/小猪 · E 射击
         </div>
       </section>
     </main>
