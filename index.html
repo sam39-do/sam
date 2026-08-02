@@ -20,7 +20,7 @@
             <span class="brand-mark" aria-hidden="true"></span>
             <span>小熊 3D 生存沙盒</span>
           </div>
-          <div class="hud-pill"><span>生命</span><strong id="lifeValue">15</strong></div>
+          <div class="hud-pill"><span>生命</span><strong id="lifeValue">100</strong></div>
           <div class="hud-pill"><span>护盾</span><strong id="shieldValue">0</strong></div>
           <div class="hud-pill"><span>星星</span><strong id="starValue">0</strong></div>
           <div class="hud-pill"><span>武器</span><strong id="weaponValue">球拍</strong></div>
@@ -31,6 +31,10 @@
         <aside class="inventory-panel" aria-label="资源背包">
           <div class="panel-title">生存背包</div>
           <div class="inventory-grid" id="inventoryGrid"></div>
+        </aside>
+
+        <aside class="minimap-panel" aria-label="小地图">
+          <canvas id="minimapCanvas" width="168" height="168"></canvas>
         </aside>
 
         <aside class="shop-panel is-hidden" id="shopPanel" aria-label="道具商店">

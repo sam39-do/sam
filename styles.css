@@ -55,6 +55,7 @@ button {
 
 .top-hud,
 .inventory-panel,
+.minimap-panel,
 .shop-panel,
 .toolbelt,
 .action-panel,
@@ -78,6 +79,7 @@ button {
 .hud-brand,
 .hud-pill,
 .inventory-panel,
+.minimap-panel,
 .shop-panel,
 .action-panel,
 .boss-hud,
@@ -135,6 +137,22 @@ button {
   bottom: 92px;
   width: 172px;
   padding: 10px;
+}
+
+.minimap-panel {
+  top: 64px;
+  left: 12px;
+  width: 188px;
+  padding: 10px;
+}
+
+#minimapCanvas {
+  display: block;
+  width: 168px;
+  height: 168px;
+  border-radius: 8px;
+  background: #172a22;
+  image-rendering: pixelated;
 }
 
 .panel-title {
