@@ -34,7 +34,7 @@ const QA_ENABLED = new URLSearchParams(window.location.search).has("qa");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
 const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
-const RENDER_RADIUS = 42;
+const RENDER_RADIUS = 30;
 const RENDER_REFRESH_DISTANCE = 6;
 const PLAYER_MAX_LIVES = 100;
 const PLAYER_MAX_SHIELDS = 3;
@@ -47,9 +47,11 @@ const CREATIVE_INTERACT_RANGE = 18;
 const GRAPPLE_RANGE = 46;
 const GRAPPLE_PULL = 34;
 const ENEMY_ACTIVE_RADIUS = 180;
-const EPIC_EFFECT_MULTIPLIER = 4;
-const MAX_PARTICLES = 650;
-const MINIMAP_REFRESH_INTERVAL = 0.25;
+const TITAN_ACTIVE_RADIUS = 260;
+const EPIC_EFFECT_MULTIPLIER = 3;
+const MAX_PARTICLES = 480;
+const MINIMAP_REFRESH_INTERVAL = 0.35;
+const TARGET_FPS = 60;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
 const VOLCANO_COUNT = 9;
@@ -177,25 +179,28 @@ const TOOL_SLOTS = [
 ];
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8bd7ec);
-scene.fog = new THREE.Fog(0x8bd7ec, 70, 170);
+scene.background = new THREE.Color(0xa7dcf3);
+scene.fog = new THREE.Fog(0xa7dcf3, 92, 220);
 
 const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 220);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+let renderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.55);
+let fpsAverage = TARGET_FPS;
+let fpsAdjustTimer = 0;
+renderer.setPixelRatio(renderPixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.18;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-const hemi = new THREE.HemisphereLight(0xe9fbff, 0x35553e, 2.05);
+const hemi = new THREE.HemisphereLight(0xf2fbff, 0x3e6646, 2.35);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff1c9, 2.75);
+const sun = new THREE.DirectionalLight(0xfff1c9, 2.9);
 sun.position.set(18, 30, 14);
 sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -48;
 sun.shadow.camera.right = 48;
 sun.shadow.camera.top = 48;
@@ -222,6 +227,7 @@ const particles = [];
 let boss = null;
 let lastRenderCenter = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
 let minimapTimer = 0;
+let uiTimer = 0;
 
 scene.add(blockMeshes);
 
@@ -262,6 +268,7 @@ const player = {
   speed: 6,
   grappleTarget: null,
   grappleTimer: 0,
+  windPhase: 0,
 };
 
 const input = {
@@ -313,6 +320,9 @@ function exposeQaHooks() {
       playerY: Number(player.position.y.toFixed(3)),
       playerZ: Number(player.position.z.toFixed(3)),
       volcanoCount: volcanoes.length,
+      enemyCount: enemies.filter((enemy) => !enemy.defeated).length,
+      titanCount: enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length,
+      fps: Number(fpsAverage.toFixed(1)),
       enemies: enemies
         .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
         .slice(0, 6)
@@ -333,6 +343,9 @@ function updateQaDebug() {
   document.body.dataset.playerZ = player.position.z.toFixed(3);
   document.body.dataset.mode = state.mode;
   document.body.dataset.volcanoCount = String(volcanoes.length);
+  document.body.dataset.enemyCount = String(enemies.filter((enemy) => !enemy.defeated).length);
+  document.body.dataset.titanCount = String(enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length);
+  document.body.dataset.fps = fpsAverage.toFixed(1);
   document.body.dataset.enemySample = enemies
     .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
     .slice(0, 6)
@@ -513,7 +526,7 @@ function addBlock(x, y, z, type, sparkle = true, natural = false, persist = fals
   if (blocks.has(key)) return false;
   const mesh = new THREE.Mesh(blockGeometry, getBlockMaterial(type));
   mesh.position.set(x, y + 0.5, z);
-  mesh.castShadow = true;
+  mesh.castShadow = !natural || type === "lamp";
   mesh.receiveShadow = true;
   mesh.userData = { kind: "block", type, x, y, z, natural, persist };
   blockMeshes.add(mesh);
@@ -619,6 +632,7 @@ function rebuildPlayerModel() {
   }
   const belt = box(0.68, 0.08, 0.09, mat(0x0f1f1b, 0.35, 0.08), 0, 0.67, -0.03);
   const sash = box(0.08, 0.62, 0.07, mat(0x8d1f2d, 0.38), 0.28, 0.48, -0.05);
+  const cape = makeScoutCape();
   armR.rotation.z = -0.52;
   armL.rotation.z = 0.26;
   player.group.add(
@@ -642,6 +656,7 @@ function rebuildPlayerModel() {
     robe,
     belt,
     sash,
+    cape,
   );
 
   if (state.equippedSkin === "gundam") {
@@ -702,6 +717,40 @@ function rebuildPlayerModel() {
       player.group.add(pig);
     }
   }
+}
+
+function makeScoutCape() {
+  const cape = new THREE.Group();
+  cape.name = "scoutCape";
+  const cloth = mat(0x163f2b, 0.72, 0);
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0xdbe7d5,
+    emissive: 0x2f5a40,
+    emissiveIntensity: 0.12,
+    roughness: 0.58,
+  });
+  const panel = box(0.82, 0.9, 0.035, cloth, 0, 0.92, 0.36);
+  panel.rotation.x = -0.12;
+  cape.add(panel);
+  for (let i = 0; i < 3; i += 1) {
+    const leftWing = box(0.28 - i * 0.045, 0.035, 0.024, wingMat, -0.16 - i * 0.035, 1.04 - i * 0.06, 0.335);
+    const rightWing = box(0.28 - i * 0.045, 0.035, 0.024, wingMat, 0.16 + i * 0.035, 1.04 - i * 0.06, 0.335);
+    leftWing.rotation.z = 0.52 - i * 0.08;
+    rightWing.rotation.z = -0.52 + i * 0.08;
+    cape.add(leftWing, rightWing);
+  }
+  return cape;
+}
+
+function updateCape(dt) {
+  const cape = player.group.getObjectByName("scoutCape");
+  if (!cape) return;
+  player.windPhase += dt * 1.8;
+  const wind = Math.sin(player.windPhase + player.position.x * 0.025 + player.position.z * 0.018);
+  const speedLift = Math.min(0.55, player.velocity.length() * 0.018);
+  cape.rotation.x = -0.12 - speedLift + wind * 0.08;
+  cape.rotation.z = wind * 0.08;
+  cape.position.y = Math.sin(player.windPhase * 1.7) * 0.018;
 }
 
 function addOdmGearModel() {
@@ -781,7 +830,7 @@ function setupEnemies() {
     ["turret", -28, -22],
   ];
 
-  for (let i = 0; i < 42; i += 1) {
+  for (let i = 0; i < 72; i += 1) {
     const angle = i * 2.399;
     const ring = 44 + (i % 7) * 28 + Math.floor(i / 7) * 18;
     const x = Math.round(Math.cos(angle) * ring + seededNoise(i, 401) * 18 - 9);
@@ -789,7 +838,7 @@ function setupEnemies() {
     monsterSpawns.push([i % 4 === 0 ? "racketMonster" : "zombie", x, z]);
   }
 
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < 14; i += 1) {
     const angle = (i / 8) * Math.PI * 2 + 0.4;
     const x = Math.round(Math.cos(angle) * (90 + i * 17));
     const z = Math.round(Math.sin(angle) * (90 + i * 17));
@@ -808,19 +857,44 @@ function setupEnemies() {
   spawnEnemy("shadowBoss", -104, 92).active = false;
   spawnEnemy("rabbitBoss", 132, -118).active = false;
   spawnEnemy("zombieBoss", -142, -126).active = false;
+  spawnTitanPack("pureTitan", 72, -58, 6);
+  spawnTitanPack("abnormalTitan", -78, -74, 5);
+  spawnTitanPack("pureTitan", 142, 48, 7);
+  spawnTitanPack("abnormalTitan", -156, 32, 5);
+  spawnEnemy("attackTitan", 190, 120);
+  spawnEnemy("armoredTitan", -210, 118);
+  spawnEnemy("femaleTitan", 205, -136);
+  spawnEnemy("beastTitan", -198, -164);
+  spawnEnemy("jawTitan", 84, 188);
+  spawnEnemy("colossalTitan", -244, 12);
+}
+
+function spawnTitanPack(type, x, z, count) {
+  const packId = `${type}-${x}-${z}`;
+  for (let i = 0; i < count; i += 1) {
+    const angle = (i / count) * Math.PI * 2;
+    const enemy = spawnEnemy(type, x + Math.cos(angle) * (5 + i * 0.45), z + Math.sin(angle) * (5 + i * 0.45));
+    enemy.packId = packId;
+    enemy.packHome = new THREE.Vector3(x, 0, z);
+  }
 }
 
 function spawnEnemy(type, x, z) {
   const isBoss = type.includes("Boss");
+  const isTitan = isTitanType(type);
+  const titan = getTitanStats(type);
   const enemy = {
     type,
     name: getEnemyName(type),
     position: new THREE.Vector3(x, highestBlockY(Math.round(x), Math.round(z)), z),
     velocity: new THREE.Vector3(),
-    hp: isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
-    maxHp: isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
-    damage: isBoss ? (type === "lavaBoss" ? 10 : 8) : type === "turret" ? 4 : 3,
-    speed: type === "zombie" ? 2.2 : type === "racketMonster" ? 2.7 : type === "turret" ? 0 : type === "shadowBoss" ? 2.4 : 1.8,
+    hp: isTitan ? titan.hp : isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
+    maxHp: isTitan ? titan.hp : isBoss ? getBossHp(type) : type === "turret" ? 28 : 22,
+    damage: isTitan ? titan.damage : isBoss ? (type === "lavaBoss" ? 10 : 8) : type === "turret" ? 4 : 3,
+    speed: isTitan ? titan.speed : type === "zombie" ? 2.2 : type === "racketMonster" ? 2.7 : type === "turret" ? 0 : type === "shadowBoss" ? 2.4 : 1.8,
+    titanScale: isTitan ? titan.scale : 1,
+    napeHeight: isTitan ? titan.napeHeight : 1,
+    napeHits: 0,
     cooldown: 1 + Math.random(),
     invulnerable: 0,
     active: true,
@@ -831,6 +905,23 @@ function spawnEnemy(type, x, z) {
   scene.add(enemy.group);
   enemies.push(enemy);
   return enemy;
+}
+
+function isTitanType(type) {
+  return type.endsWith("Titan");
+}
+
+function getTitanStats(type) {
+  return {
+    pureTitan: { hp: 55, damage: 9, speed: 1.55, scale: 3.2, napeHeight: 4.25 },
+    abnormalTitan: { hp: 68, damage: 11, speed: 2.65, scale: 3.5, napeHeight: 4.65 },
+    attackTitan: { hp: 190, damage: 16, speed: 2.15, scale: 5.0, napeHeight: 6.55 },
+    armoredTitan: { hp: 260, damage: 18, speed: 1.7, scale: 5.2, napeHeight: 6.8 },
+    femaleTitan: { hp: 210, damage: 16, speed: 2.25, scale: 4.9, napeHeight: 6.3 },
+    beastTitan: { hp: 240, damage: 20, speed: 1.45, scale: 5.6, napeHeight: 7.25 },
+    jawTitan: { hp: 150, damage: 15, speed: 3.2, scale: 2.7, napeHeight: 3.55 },
+    colossalTitan: { hp: 420, damage: 28, speed: 0.75, scale: 10.5, napeHeight: 13.3 },
+  }[type] || { hp: 60, damage: 10, speed: 1.7, scale: 3.2, napeHeight: 4.2 };
 }
 
 function getBossHp(type) {
@@ -853,6 +944,14 @@ function getEnemyName(type) {
     gundamBoss: "Gundam Mech Boss",
     lavaBoss: "Deep Red Volcano Boss",
     shadowBoss: "Shadow Hook Boss",
+    pureTitan: "无垢巨人 普通种",
+    abnormalTitan: "无垢巨人 奇行种",
+    attackTitan: "进击巨人",
+    armoredTitan: "铠甲巨人",
+    femaleTitan: "女型巨人",
+    beastTitan: "兽之巨人",
+    jawTitan: "颚之巨人",
+    colossalTitan: "超大型巨人",
   }[type];
 }
 
@@ -860,7 +959,9 @@ function createEnemyModel(type) {
   const group = new THREE.Group();
   const eyeMat = mat(0x111827, 0.35);
   const glowMat = mat(0xfff1a8, 0.25, 0.08);
-  if (type === "zombie") {
+  if (isTitanType(type)) {
+    createTitanModel(group, type);
+  } else if (type === "zombie") {
     group.add(ellipsoid(0.44, 0.58, 0.34, mat(0x6aa05c, 0.5), 0, 0.72, 0));
     group.add(ellipsoid(0.38, 0.36, 0.34, mat(0xaed982, 0.46), 0, 1.38, 0));
     group.add(sphere(0.05, eyeMat, -0.13, 1.44, -0.32));
@@ -944,6 +1045,67 @@ function createEnemyModel(type) {
   });
   group.userData.kind = "enemy";
   return group;
+}
+
+function createTitanModel(group, type) {
+  const stats = getTitanStats(type);
+  const scale = stats.scale;
+  const skin =
+    type === "armoredTitan"
+      ? 0xa87955
+      : type === "femaleTitan"
+        ? 0xd6b48f
+        : type === "beastTitan"
+          ? 0x5e4230
+          : type === "jawTitan"
+            ? 0xd0a064
+            : type === "colossalTitan"
+              ? 0xa53a31
+              : 0xd4a074;
+  const skinMat = mat(skin, 0.58, type === "armoredTitan" ? 0.16 : 0.03);
+  const muscleMat = new THREE.MeshStandardMaterial({
+    color: type === "colossalTitan" ? 0x8f1f1d : 0xb25a43,
+    emissive: type === "colossalTitan" ? 0x3a0908 : 0x000000,
+    emissiveIntensity: type === "colossalTitan" ? 0.28 : 0,
+    roughness: 0.5,
+    metalness: 0.02,
+  });
+  const hairMat = mat(type === "femaleTitan" ? 0xc9b26d : type === "beastTitan" ? 0x2d211b : 0x221915, 0.72);
+  const eye = mat(0x0f172a, 0.25);
+
+  const body = ellipsoid(0.22 * scale, 0.54 * scale, 0.16 * scale, type === "colossalTitan" ? muscleMat : skinMat, 0, 0.58 * scale, 0);
+  const head = ellipsoid(0.17 * scale, 0.18 * scale, 0.15 * scale, skinMat, 0, 1.26 * scale, -0.02 * scale);
+  const nape = box(0.18 * scale, 0.08 * scale, 0.035 * scale, mat(0xb70d19, 0.3, 0.06), 0, stats.napeHeight, 0.16 * scale);
+  nape.name = "napeWeakPoint";
+  const eyeL = sphere(0.018 * scale, eye, -0.055 * scale, 1.29 * scale, -0.13 * scale);
+  const eyeR = sphere(0.018 * scale, eye, 0.055 * scale, 1.29 * scale, -0.13 * scale);
+  const legL = ellipsoid(0.07 * scale, 0.44 * scale, 0.07 * scale, skinMat, -0.09 * scale, 0.02 * scale, 0);
+  const legR = ellipsoid(0.07 * scale, 0.44 * scale, 0.07 * scale, skinMat, 0.09 * scale, 0.02 * scale, 0);
+  const armL = ellipsoid(0.055 * scale, 0.42 * scale, 0.055 * scale, skinMat, -0.28 * scale, 0.62 * scale, 0.02 * scale);
+  const armR = ellipsoid(0.055 * scale, 0.42 * scale, 0.055 * scale, skinMat, 0.28 * scale, 0.62 * scale, 0.02 * scale);
+  armL.rotation.z = type === "abnormalTitan" ? 0.9 : 0.28;
+  armR.rotation.z = type === "abnormalTitan" ? -0.55 : -0.28;
+  group.add(body, head, nape, eyeL, eyeR, legL, legR, armL, armR);
+
+  if (type === "armoredTitan") {
+    group.add(box(0.54 * scale, 0.12 * scale, 0.28 * scale, mat(0xd1b27e, 0.4, 0.22), 0, 0.78 * scale, -0.01 * scale));
+    group.add(box(0.26 * scale, 0.1 * scale, 0.2 * scale, mat(0xd1b27e, 0.4, 0.22), -0.11 * scale, 1.08 * scale, -0.08 * scale));
+    group.add(box(0.26 * scale, 0.1 * scale, 0.2 * scale, mat(0xd1b27e, 0.4, 0.22), 0.11 * scale, 1.08 * scale, -0.08 * scale));
+  }
+  if (type === "beastTitan") {
+    group.add(ellipsoid(0.24 * scale, 0.08 * scale, 0.13 * scale, hairMat, 0, 1.39 * scale, -0.02 * scale));
+    armL.scale.y *= 1.35;
+    armR.scale.y *= 1.35;
+  }
+  if (type === "femaleTitan") {
+    group.add(ellipsoid(0.18 * scale, 0.04 * scale, 0.14 * scale, hairMat, 0, 1.41 * scale, -0.01 * scale));
+  }
+  if (type === "jawTitan") {
+    group.add(box(0.22 * scale, 0.08 * scale, 0.11 * scale, mat(0xf2d8a8, 0.42, 0.12), 0, 1.17 * scale, -0.16 * scale));
+  }
+  if (type === "colossalTitan") {
+    group.add(new THREE.PointLight(0xff3a21, 2.8, 16));
+  }
 }
 
 function setupUI() {
@@ -1127,7 +1289,7 @@ function onMouseMove(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   if (document.pointerLockElement === canvas) {
     state.yaw -= event.movementX * 0.0024;
-    state.pitch = THREE.MathUtils.clamp(state.pitch - event.movementY * 0.0018, -0.95, 0.55);
+    state.pitch = THREE.MathUtils.clamp(state.pitch + event.movementY * 0.0018, -0.95, 0.55);
   }
 }
 
@@ -1136,7 +1298,8 @@ function onMouseDown(event) {
   if (document.pointerLockElement !== canvas) requestMouseLock();
   if (event.button === 2) {
     input.rightMouseDown = true;
-    placeSelectedBlock();
+    if (state.odmEquipped) bladeTitanNapeAttack();
+    else placeSelectedBlock();
   } else {
     input.mouseDown = true;
     useSelectedTool();
@@ -1220,6 +1383,7 @@ function loop() {
 }
 
 function update(dt) {
+  updateAdaptiveQuality(dt);
   if (state.started) {
     updateSurvivalCreativeSurge(dt);
     updatePlayer(dt);
@@ -1236,7 +1400,11 @@ function update(dt) {
   state.invulnerable = Math.max(0, state.invulnerable - dt);
   updateParticles(dt);
   updateCamera();
-  updateUI();
+  uiTimer -= dt;
+  if (uiTimer <= 0) {
+    uiTimer = 0.12;
+    updateUI();
+  }
   updateQaDebug();
   minimapTimer -= dt;
   if (minimapTimer <= 0) {
@@ -1246,6 +1414,24 @@ function update(dt) {
   if (state.messageTimer > 0) {
     state.messageTimer -= dt;
     if (state.messageTimer <= 0) messageFeed.classList.remove("is-visible");
+  }
+}
+
+function updateAdaptiveQuality(dt) {
+  const fps = 1 / Math.max(dt, 0.001);
+  fpsAverage = fpsAverage * 0.94 + fps * 0.06;
+  fpsAdjustTimer -= dt;
+  if (fpsAdjustTimer > 0) return;
+  fpsAdjustTimer = 2.0;
+  const maxRatio = Math.min(window.devicePixelRatio || 1, 1.6);
+  if (fpsAverage < 44 && renderPixelRatio > 1.0) {
+    renderPixelRatio = Math.max(1.0, renderPixelRatio - 0.15);
+    renderer.setPixelRatio(renderPixelRatio);
+    resize();
+  } else if (fpsAverage > 58 && renderPixelRatio < maxRatio) {
+    renderPixelRatio = Math.min(maxRatio, renderPixelRatio + 0.1);
+    renderer.setPixelRatio(renderPixelRatio);
+    resize();
   }
 }
 
@@ -1296,6 +1482,7 @@ function updatePlayer(dt) {
   player.position.z = THREE.MathUtils.clamp(player.position.z, -HALF_WORLD + 1, HALF_WORLD - 1);
   player.group.position.copy(player.position);
   player.group.rotation.y = state.yaw + Math.PI;
+  updateCape(dt);
 }
 
 function updateGrapplePull(dt) {
@@ -1389,6 +1576,7 @@ function getGroundY(x, z) {
 function updateEnemies(dt) {
   const activeBoss = getActiveBoss();
   const now = performance.now();
+  const packCenters = buildPackCenters();
   for (const enemy of enemies) {
     if (enemy.defeated) continue;
     const distance = enemy.position.distanceTo(player.position);
@@ -1398,7 +1586,11 @@ function updateEnemies(dt) {
       announce(`${enemy.name} 出现`);
     }
     if (!enemy.active) continue;
-    if (!enemy.type.includes("Boss") && distance > ENEMY_ACTIVE_RADIUS) {
+    if (isTitanType(enemy.type) && distance > TITAN_ACTIVE_RADIUS) {
+      enemy.group.visible = false;
+      continue;
+    }
+    if (!isTitanType(enemy.type) && !enemy.type.includes("Boss") && distance > ENEMY_ACTIVE_RADIUS) {
       enemy.group.visible = false;
       continue;
     }
@@ -1406,14 +1598,20 @@ function updateEnemies(dt) {
 
     enemy.invulnerable = Math.max(0, enemy.invulnerable - dt);
     enemy.cooldown -= dt;
-    const toPlayer = player.position.clone().sub(enemy.position);
+    const packCenter = enemy.packId ? packCenters.get(enemy.packId) : null;
+    const packTarget = packCenter ? player.position.clone().sub(packCenter) : null;
+    const toPlayer = packTarget && packTarget.lengthSq() > 0.01 ? packTarget : player.position.clone().sub(enemy.position);
     toPlayer.y = 0;
     if (toPlayer.lengthSq() > 0.01) {
       enemy.group.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
       toPlayer.normalize();
     }
+    if (enemy.type === "abnormalTitan") {
+      const weave = new THREE.Vector3(Math.cos(now * 0.004 + enemy.position.x), 0, Math.sin(now * 0.004 + enemy.position.z)).multiplyScalar(0.45);
+      toPlayer.add(weave).normalize();
+    }
 
-    const stopDistance = enemy.type.includes("Boss") ? 2.35 : 1.25;
+    const stopDistance = isTitanType(enemy.type) ? enemy.titanScale * 0.48 + 1.2 : enemy.type.includes("Boss") ? 2.35 : 1.25;
     if (enemy.type !== "turret" && distance > stopDistance) {
       moveEnemyWithCollision(enemy, toPlayer, enemy.speed * dt);
       enemy.position.y = getGroundY(enemy.position.x, enemy.position.z);
@@ -1422,22 +1620,38 @@ function updateEnemies(dt) {
     if (enemy.cooldown <= 0) {
       if (enemy.type === "turret" || enemy.type === "racketMonster" || enemy.type === "gundamBoss") {
         shootEnemy(enemy);
-      } else if (distance < (enemy.type.includes("Boss") ? 2.4 : 1.3)) {
+      } else if (distance < (isTitanType(enemy.type) ? enemy.titanScale * 0.58 + 1.6 : enemy.type.includes("Boss") ? 2.4 : 1.3)) {
         hurtPlayer(enemy.damage, enemy.name);
       }
-      enemy.cooldown = enemy.type.includes("Boss") ? 0.8 : enemy.type === "turret" ? 0.7 : 1.2;
+      enemy.cooldown = isTitanType(enemy.type) ? 1.4 : enemy.type.includes("Boss") ? 0.8 : enemy.type === "turret" ? 0.7 : 1.2;
     }
 
     enemy.group.position.copy(enemy.position);
     enemy.group.position.y += Math.sin(now / 230 + enemy.position.x) * (enemy.type.includes("Boss") ? 0.045 : 0.035);
-    enemy.group.rotation.z = Math.sin(now / 280 + enemy.position.z) * (enemy.type === "turret" ? 0 : 0.035);
+    enemy.group.rotation.z = Math.sin(now / (enemy.type === "abnormalTitan" ? 150 : 280) + enemy.position.z) * (enemy.type === "turret" ? 0 : isTitanType(enemy.type) ? 0.055 : 0.035);
   }
   if (!activeBoss && boss && boss.defeated) boss = null;
 }
 
+function buildPackCenters() {
+  const packs = new Map();
+  for (const enemy of enemies) {
+    if (!enemy.packId || enemy.defeated) continue;
+    if (!packs.has(enemy.packId)) packs.set(enemy.packId, { center: new THREE.Vector3(), count: 0 });
+    const pack = packs.get(enemy.packId);
+    pack.center.add(enemy.position);
+    pack.count += 1;
+  }
+  for (const [id, pack] of packs) {
+    pack.center.divideScalar(Math.max(1, pack.count));
+    packs.set(id, pack.center);
+  }
+  return packs;
+}
+
 function moveEnemyWithCollision(enemy, direction, amount) {
-  const radius = enemy.type.includes("Boss") ? 0.9 : 0.42;
-  const height = enemy.type.includes("Boss") ? 2.35 : 1.45;
+  const radius = isTitanType(enemy.type) ? enemy.titanScale * 0.24 : enemy.type.includes("Boss") ? 0.9 : 0.42;
+  const height = isTitanType(enemy.type) ? enemy.titanScale * 1.35 : enemy.type.includes("Boss") ? 2.35 : 1.45;
   const sideways = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
   const candidates = [
     direction,
@@ -1489,19 +1703,84 @@ function useGrappleHook() {
   if (!state.odmEquipped || state.grappleCooldown > 0) return;
   state.grappleCooldown = 0.16;
   state.weaponMode = "odm";
-  const hit = raycastBlock();
   const origin = player.position.clone().add(new THREE.Vector3(0, 1.05, 0));
   const direction = getLookDirection();
-  const target =
-    hit && hit.distance <= GRAPPLE_RANGE
-      ? hit.point.clone()
-      : origin.clone().addScaledVector(direction, GRAPPLE_RANGE * 0.72);
+  const target = getGrappleTarget(origin, direction);
   player.grappleTarget = target;
   player.grappleTimer = 1.15;
   const pull = target.clone().sub(origin).normalize().multiplyScalar(16);
   player.velocity.add(pull);
   spawnGrappleLine(origin, target);
   spawnParticles(origin.clone().addScaledVector(direction, 0.6), 0x9b111e, 28, 2.8, "bloodWind");
+}
+
+function getGrappleTarget(origin, direction) {
+  const hit = raycastBlock();
+  if (hit && hit.distance <= GRAPPLE_RANGE) return hit.point.clone();
+  let best = GRAPPLE_RANGE;
+  let target = null;
+  for (const enemy of enemies) {
+    if (!enemy.active || enemy.defeated || !enemy.group.visible) continue;
+    const height = isTitanType(enemy.type) ? enemy.napeHeight * 0.72 : enemy.type.includes("Boss") ? 1.8 : 0.9;
+    const point = enemy.position.clone().add(new THREE.Vector3(0, height, 0));
+    const toPoint = point.clone().sub(origin);
+    const distance = toPoint.length();
+    if (distance > best) continue;
+    const angle = direction.angleTo(toPoint.clone().normalize());
+    if (angle < 0.45) {
+      best = distance;
+      target = point;
+    }
+  }
+  return target || origin.clone().addScaledVector(direction, GRAPPLE_RANGE * 0.82);
+}
+
+function bladeTitanNapeAttack() {
+  if (!state.odmEquipped || state.attackCooldown > 0) return;
+  state.attackCooldown = 0.34;
+  const direction = getLookDirection();
+  const origin = player.position.clone().add(new THREE.Vector3(0, 1.18, 0));
+  let target = null;
+  let best = Number.POSITIVE_INFINITY;
+  let targetNape = null;
+  for (const enemy of enemies) {
+    if (!isTitanType(enemy.type) || !enemy.active || enemy.defeated || !enemy.group.visible) continue;
+    const nape = getTitanNapePosition(enemy);
+    const toNape = nape.clone().sub(origin);
+    const distance = toNape.length();
+    if (distance > 5.8) continue;
+    const angle = direction.angleTo(toNape.clone().normalize());
+    const backVector = getTitanBackVector(enemy);
+    const fromNapeToPlayer = origin.clone().sub(nape).normalize();
+    const behindFactor = backVector.dot(fromNapeToPlayer);
+    if (angle < 0.9 && behindFactor > -0.1 && distance < best) {
+      best = distance;
+      target = enemy;
+      targetNape = nape;
+    }
+  }
+  swingOdmBlade(targetNape || origin.clone().addScaledVector(direction, 1.4));
+  if (!target) {
+    announce("刀刃需要贴近巨人后颈");
+    return;
+  }
+  const damage = target.type === "colossalTitan" ? 135 : target.type === "pureTitan" || target.type === "abnormalTitan" ? target.maxHp : 95;
+  damageEnemy(target, damage, "后颈刀刃");
+  player.velocity.addScaledVector(direction, 5);
+}
+
+function getTitanNapePosition(enemy) {
+  return enemy.group.localToWorld(new THREE.Vector3(0, enemy.napeHeight, 0.16 * enemy.titanScale));
+}
+
+function getTitanBackVector(enemy) {
+  return new THREE.Vector3(0, 0, 1).applyEuler(enemy.group.rotation).normalize();
+}
+
+function swingOdmBlade(target) {
+  const origin = player.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+  spawnGrappleLine(origin, target);
+  spawnParticles(target, 0xc41220, 38, 3.6, "bloodWind");
 }
 
 function spawnGrappleLine(origin, target) {
@@ -1831,16 +2110,25 @@ function burnVolcanoSurroundings(volcano, origin) {
 }
 
 function damageEnemy(enemy, amount, label) {
+  if (isTitanType(enemy.type) && label !== "后颈刀刃") {
+    if (!label.includes("火山")) {
+      spawnParticles(getTitanNapePosition(enemy), 0x6b0f17, 10, 1.2, "bloodWind");
+      announce("巨人的弱点在后颈");
+      return;
+    }
+    amount = Math.max(1, Math.ceil(amount * 0.25));
+  }
   enemy.hp -= amount;
   enemy.invulnerable = 0.18;
-  spawnParticles(enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff6f72, 42, 3.2, "impact");
+  spawnParticles(isTitanType(enemy.type) ? getTitanNapePosition(enemy) : enemy.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xff6f72, 42, 3.2, isTitanType(enemy.type) ? "bloodWind" : "impact");
   announce(`${label} -${amount}`);
   if (enemy.hp <= 0) {
     enemy.defeated = true;
     scene.remove(enemy.group);
-    state.stars += enemy.type.includes("Boss") ? 500 : enemy.type === "turret" ? 30 : 20;
+    state.stars += isTitanType(enemy.type) ? Math.ceil(enemy.maxHp * 1.4) : enemy.type.includes("Boss") ? 500 : enemy.type === "turret" ? 30 : 20;
     if (enemy.type === "zombieBoss") summonPack(enemy.position, "zombie");
     if (enemy.type === "rabbitBoss") summonPack(enemy.position, "racketMonster");
+    if (isTitanType(enemy.type)) spawnParticles(getTitanNapePosition(enemy), 0xc41220, 80, 4.6, "bloodWind");
     announce(`${enemy.name} 已击败`);
   }
 }
