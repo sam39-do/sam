@@ -28,6 +28,7 @@ const racketShop = document.getElementById("racketShop");
 const abilityShop = document.getElementById("abilityShop");
 const spinButton = document.getElementById("spinButton");
 
+const QA_ENABLED = new URLSearchParams(window.location.search).has("qa");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
 const WORLD_SIZE = 72;
 const HALF_WORLD = WORLD_SIZE / 2;
@@ -35,6 +36,8 @@ const PLAYER_MAX_LIVES = 15;
 const PLAYER_MAX_SHIELDS = 3;
 const PLAYER_RADIUS = 0.36;
 const PLAYER_HEIGHT = 1.85;
+const GRAVITY = 18;
+const JUMP_FORCE = 8.2;
 const INTERACT_RANGE = 8;
 const CREATIVE_INTERACT_RANGE = 18;
 const BLOCKS = {
@@ -120,27 +123,34 @@ const TOOL_SLOTS = [
 ];
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x6db8d2);
-scene.fog = new THREE.Fog(0x6db8d2, 54, 150);
+scene.background = new THREE.Color(0x8bd7ec);
+scene.fog = new THREE.Fog(0x8bd7ec, 70, 170);
 
 const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 220);
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-const hemi = new THREE.HemisphereLight(0xdff7ff, 0x30402c, 1.8);
+const hemi = new THREE.HemisphereLight(0xe9fbff, 0x35553e, 2.05);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff0c2, 2.2);
-sun.position.set(12, 22, 8);
+const sun = new THREE.DirectionalLight(0xfff1c9, 2.75);
+sun.position.set(18, 30, 14);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -35;
-sun.shadow.camera.right = 35;
-sun.shadow.camera.top = 35;
-sun.shadow.camera.bottom = -35;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.left = -48;
+sun.shadow.camera.right = 48;
+sun.shadow.camera.top = 48;
+sun.shadow.camera.bottom = -48;
 scene.add(sun);
+
+const rimLight = new THREE.DirectionalLight(0x82d8ff, 0.8);
+rimLight.position.set(-24, 16, -18);
+scene.add(rimLight);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -196,6 +206,7 @@ const input = {
   jump: false,
   mouseDown: false,
   rightMouseDown: false,
+  jumpQueued: false,
 };
 
 const clock = new THREE.Clock();
@@ -209,20 +220,56 @@ function init() {
   setupUI();
   bindEvents();
   loadGame();
+  exposeQaHooks();
   resize();
   updateUI();
   renderer.setAnimationLoop(loop);
 }
 
+function exposeQaHooks() {
+  if (!QA_ENABLED) return;
+  window.__bearSandboxDebug = () => ({
+    mode: state.mode,
+    playerY: Number(player.position.y.toFixed(3)),
+    enemies: enemies
+      .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
+      .slice(0, 6)
+      .map((enemy) => ({
+        type: enemy.type,
+        x: Number(enemy.position.x.toFixed(3)),
+        y: Number(enemy.position.y.toFixed(3)),
+        z: Number(enemy.position.z.toFixed(3)),
+      })),
+  });
+}
+
+function updateQaDebug() {
+  if (!QA_ENABLED) return;
+  document.body.dataset.playerY = player.position.y.toFixed(3);
+  document.body.dataset.mode = state.mode;
+  document.body.dataset.enemySample = enemies
+    .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
+    .slice(0, 6)
+    .map((enemy) => `${enemy.type}:${enemy.position.x.toFixed(2)},${enemy.position.z.toFixed(2)}`)
+    .join("|");
+}
+
 function setupWorld() {
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(150, 150),
-    new THREE.MeshStandardMaterial({ color: 0x4f9db3, roughness: 0.7, metalness: 0.05 }),
+    new THREE.MeshStandardMaterial({
+      color: 0x55abc3,
+      roughness: 0.42,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.86,
+    }),
   );
   water.rotation.x = -Math.PI / 2;
   water.position.y = -0.08;
   water.receiveShadow = true;
   scene.add(water);
+  addAtmosphereDetails();
 
   for (let x = -HALF_WORLD; x < HALF_WORLD; x += 1) {
     for (let z = -HALF_WORLD; z < HALF_WORLD; z += 1) {
@@ -251,6 +298,25 @@ function setupWorld() {
 
   addBlock(2, 3, 3, "lamp", true);
   addBlock(-2, 2, -3, "wood", true);
+}
+
+function addAtmosphereDetails() {
+  for (const [x, y, z, s] of [
+    [-26, 14, -22, 1.2],
+    [8, 16, -28, 0.9],
+    [28, 13, 16, 1.05],
+    [-12, 18, 24, 1.0],
+  ]) {
+    const cloud = new THREE.Group();
+    cloud.add(ellipsoid(1.7 * s, 0.42 * s, 0.72 * s, mat(0xffffff, 0.55), 0, 0, 0));
+    cloud.add(ellipsoid(1.05 * s, 0.5 * s, 0.62 * s, mat(0xf3fbff, 0.55), -1.0 * s, 0.08 * s, 0.1 * s));
+    cloud.add(ellipsoid(1.15 * s, 0.55 * s, 0.68 * s, mat(0xe6f7ff, 0.55), 1.0 * s, 0.02 * s, -0.08 * s));
+    cloud.position.set(x, y, z);
+    cloud.traverse((child) => {
+      if (child.isMesh) child.castShadow = false;
+    });
+    scene.add(cloud);
+  }
 }
 
 function terrainHeight(x, z) {
@@ -340,23 +406,50 @@ function setupPlayerModel() {
 function rebuildPlayerModel() {
   player.group.clear();
   const skin = SHOP_SKINS[state.equippedSkin] || SHOP_SKINS.bear;
-  const bodyMat = mat(skin.body, 0.76);
-  const shirtMat = mat(skin.shirt, 0.7);
-  const darkMat = mat(0x1b2528, 0.82);
-  const faceMat = mat(0xf0c692, 0.62);
+  const bodyMat = mat(skin.body, 0.55, 0.02);
+  const shirtMat = mat(skin.shirt, 0.48, 0.03);
+  const darkMat = mat(0x1b2528, 0.6);
+  const faceMat = mat(0xf3cda2, 0.45);
+  const eyeMat = mat(0x101820, 0.32);
 
-  const body = box(0.72, 0.9, 0.42, shirtMat, 0, 0.78, 0);
-  const head = sphere(0.42, bodyMat, 0, 1.45, 0);
-  const face = sphere(0.29, faceMat, 0, 1.4, -0.3);
-  const earL = sphere(0.15, bodyMat, -0.29, 1.8, -0.04);
-  const earR = sphere(0.15, bodyMat, 0.29, 1.8, -0.04);
-  const legL = box(0.18, 0.56, 0.2, darkMat, -0.18, 0.18, 0);
-  const legR = box(0.18, 0.56, 0.2, darkMat, 0.18, 0.18, 0);
-  const armL = box(0.16, 0.58, 0.18, bodyMat, -0.48, 0.82, 0);
-  const armR = box(0.16, 0.58, 0.18, bodyMat, 0.48, 0.82, 0);
+  const body = ellipsoid(0.46, 0.55, 0.34, shirtMat, 0, 0.82, 0);
+  const belly = ellipsoid(0.32, 0.28, 0.16, faceMat, 0, 0.72, -0.25);
+  const head = ellipsoid(0.45, 0.42, 0.4, bodyMat, 0, 1.48, 0);
+  const muzzle = ellipsoid(0.25, 0.16, 0.15, faceMat, 0, 1.38, -0.34);
+  const earL = ellipsoid(0.16, 0.18, 0.1, bodyMat, -0.31, 1.78, -0.02);
+  const earR = ellipsoid(0.16, 0.18, 0.1, bodyMat, 0.31, 1.78, -0.02);
+  const innerEarL = ellipsoid(0.08, 0.09, 0.04, faceMat, -0.31, 1.78, -0.09);
+  const innerEarR = ellipsoid(0.08, 0.09, 0.04, faceMat, 0.31, 1.78, -0.09);
+  const eyeL = sphere(0.045, eyeMat, -0.14, 1.54, -0.36);
+  const eyeR = sphere(0.045, eyeMat, 0.14, 1.54, -0.36);
+  const nose = sphere(0.05, eyeMat, 0, 1.41, -0.48);
+  const blushL = ellipsoid(0.055, 0.03, 0.015, mat(0xff9aa9, 0.5), -0.22, 1.38, -0.39);
+  const blushR = ellipsoid(0.055, 0.03, 0.015, mat(0xff9aa9, 0.5), 0.22, 1.38, -0.39);
+  const legL = ellipsoid(0.13, 0.28, 0.13, darkMat, -0.18, 0.22, 0);
+  const legR = ellipsoid(0.13, 0.28, 0.13, darkMat, 0.18, 0.22, 0);
+  const armL = ellipsoid(0.11, 0.34, 0.1, bodyMat, -0.47, 0.88, -0.02);
+  const armR = ellipsoid(0.11, 0.34, 0.1, bodyMat, 0.47, 0.88, -0.02);
   armR.rotation.z = -0.52;
   armL.rotation.z = 0.26;
-  player.group.add(body, head, face, earL, earR, legL, legR, armL, armR);
+  player.group.add(
+    body,
+    belly,
+    head,
+    muzzle,
+    earL,
+    earR,
+    innerEarL,
+    innerEarR,
+    eyeL,
+    eyeR,
+    nose,
+    blushL,
+    blushR,
+    legL,
+    legR,
+    armL,
+    armR,
+  );
 
   if (state.equippedSkin === "gundam") {
     player.group.add(box(0.84, 0.18, 0.5, mat(0xe8eef4), 0, 1.22, 0));
@@ -402,15 +495,21 @@ function box(w, h, d, material, x, y, z) {
 }
 
 function sphere(r, material, x, y, z) {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14), material);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 28, 18), material);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
 }
 
+function ellipsoid(rx, ry, rz, material, x, y, z) {
+  const mesh = sphere(1, material, x, y, z);
+  mesh.scale.set(rx, ry, rz);
+  return mesh;
+}
+
 function cyl(r1, r2, h, material, x, y, z) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 16), material);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 24), material);
   mesh.position.set(x, y, z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -481,39 +580,57 @@ function getEnemyName(type) {
 
 function createEnemyModel(type) {
   const group = new THREE.Group();
+  const eyeMat = mat(0x111827, 0.35);
+  const glowMat = mat(0xfff1a8, 0.25, 0.08);
   if (type === "zombie") {
-    group.add(box(0.75, 1, 0.45, mat(0x6aa05c), 0, 0.62, 0));
-    group.add(sphere(0.36, mat(0xaed982), 0, 1.32, 0));
-    group.add(box(0.18, 0.5, 0.16, mat(0x1f3f3b), -0.18, 0.18, 0));
-    group.add(box(0.18, 0.5, 0.16, mat(0x1f3f3b), 0.18, 0.18, 0));
+    group.add(ellipsoid(0.44, 0.58, 0.34, mat(0x6aa05c, 0.5), 0, 0.72, 0));
+    group.add(ellipsoid(0.38, 0.36, 0.34, mat(0xaed982, 0.46), 0, 1.38, 0));
+    group.add(sphere(0.05, eyeMat, -0.13, 1.44, -0.32));
+    group.add(sphere(0.05, eyeMat, 0.13, 1.44, -0.32));
+    group.add(ellipsoid(0.12, 0.25, 0.12, mat(0x31433f, 0.6), -0.17, 0.22, 0));
+    group.add(ellipsoid(0.12, 0.25, 0.12, mat(0x31433f, 0.6), 0.17, 0.22, 0));
+    group.add(ellipsoid(0.09, 0.28, 0.08, mat(0xaed982, 0.48), -0.42, 0.86, -0.03));
+    group.add(ellipsoid(0.09, 0.28, 0.08, mat(0xaed982, 0.48), 0.42, 0.86, -0.03));
   } else if (type === "racketMonster") {
-    group.add(box(0.74, 0.9, 0.44, mat(0xd99058), 0, 0.68, 0));
-    group.add(sphere(0.4, mat(0xd99058), 0, 1.38, 0));
-    group.add(sphere(0.14, mat(0xd99058), -0.28, 1.72, 0));
-    group.add(sphere(0.14, mat(0xd99058), 0.28, 1.72, 0));
-    const racket = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.025, 8, 24), mat(0xff3d8b));
+    group.add(ellipsoid(0.45, 0.54, 0.35, mat(0xd99058, 0.5), 0, 0.75, 0));
+    group.add(ellipsoid(0.42, 0.4, 0.36, mat(0xd99058, 0.48), 0, 1.42, 0));
+    group.add(ellipsoid(0.15, 0.16, 0.1, mat(0xd99058, 0.48), -0.29, 1.76, 0));
+    group.add(ellipsoid(0.15, 0.16, 0.1, mat(0xd99058, 0.48), 0.29, 1.76, 0));
+    group.add(sphere(0.045, eyeMat, -0.13, 1.49, -0.34));
+    group.add(sphere(0.045, eyeMat, 0.13, 1.49, -0.34));
+    group.add(ellipsoid(0.18, 0.1, 0.08, mat(0xf0c692, 0.44), 0, 1.38, -0.37));
+    const racket = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.026, 10, 36), mat(0xff3d8b, 0.35, 0.08));
     racket.position.set(0.58, 1.02, -0.38);
     racket.rotation.x = 1.1;
     group.add(racket);
   } else if (type === "turret") {
-    group.add(cyl(0.42, 0.5, 0.42, mat(0x4b6760), 0, 0.22, 0));
+    group.add(cyl(0.42, 0.5, 0.42, mat(0x4b6760, 0.42, 0.12), 0, 0.22, 0));
+    group.add(ellipsoid(0.36, 0.25, 0.36, mat(0x6b8078, 0.38, 0.18), 0, 0.56, 0));
     const barrel = box(0.22, 0.22, 1.2, mat(0x26303a, 0.42, 0.3), 0, 0.55, -0.48);
     group.add(barrel);
-    group.add(sphere(0.16, mat(0xffcd6a), 0, 0.55, -1.08));
+    group.add(sphere(0.16, glowMat, 0, 0.55, -1.08));
   } else if (type === "rabbitBoss") {
-    group.add(box(1.35, 1.65, 0.8, mat(0xb7e85a), 0, 0.95, 0));
-    group.add(sphere(0.62, mat(0xcdf06e), 0, 1.9, 0));
-    group.add(cyl(0.11, 0.16, 1.1, mat(0xcdf06e), -0.34, 2.48, 0));
-    group.add(cyl(0.11, 0.16, 1.1, mat(0xcdf06e), 0.34, 2.48, 0));
+    group.add(ellipsoid(0.78, 0.95, 0.55, mat(0xb7e85a, 0.45), 0, 1.03, 0));
+    group.add(ellipsoid(0.62, 0.58, 0.52, mat(0xcdf06e, 0.42), 0, 2.0, 0));
+    group.add(ellipsoid(0.12, 0.58, 0.09, mat(0xcdf06e, 0.42), -0.33, 2.62, 0));
+    group.add(ellipsoid(0.12, 0.58, 0.09, mat(0xcdf06e, 0.42), 0.33, 2.62, 0));
+    group.add(sphere(0.075, eyeMat, -0.2, 2.06, -0.48));
+    group.add(sphere(0.075, eyeMat, 0.2, 2.06, -0.48));
+    group.add(ellipsoid(0.26, 0.13, 0.1, mat(0xf6f2df, 0.4), 0, 1.9, -0.52));
   } else if (type === "zombieBoss") {
-    group.add(box(1.35, 1.85, 0.9, mat(0x3f744e), 0, 1.04, 0));
-    group.add(sphere(0.66, mat(0x78ff79), 0, 2.06, 0));
-    group.add(box(1.7, 0.18, 0.18, mat(0x1f3f3b), 0, 1.42, -0.42));
+    group.add(ellipsoid(0.74, 1.05, 0.58, mat(0x3f744e, 0.46), 0, 1.12, 0));
+    group.add(ellipsoid(0.68, 0.62, 0.56, mat(0x78ff79, 0.43), 0, 2.18, 0));
+    group.add(sphere(0.08, eyeMat, -0.22, 2.24, -0.52));
+    group.add(sphere(0.08, eyeMat, 0.22, 2.24, -0.52));
+    group.add(box(1.72, 0.18, 0.18, mat(0x1f3f3b, 0.5), 0, 1.48, -0.48));
+    group.add(ellipsoid(0.22, 0.12, 0.08, mat(0xff6f72, 0.35, 0.08), 0, 2.03, -0.57));
   } else {
-    group.add(box(1.5, 1.95, 1, mat(0xe8eef4, 0.44, 0.25), 0, 1.05, 0));
-    group.add(box(1.1, 0.75, 1.08, mat(0x17438d, 0.42, 0.22), 0, 2.3, 0));
-    group.add(box(0.22, 1.2, 0.28, mat(0xd9343e), -0.9, 1.2, 0));
-    group.add(box(0.22, 1.2, 0.28, mat(0xf0c64a), 0.9, 1.2, 0));
+    group.add(ellipsoid(0.82, 1.05, 0.62, mat(0xe8eef4, 0.35, 0.25), 0, 1.1, 0));
+    group.add(box(1.18, 0.78, 1.08, mat(0x17438d, 0.34, 0.22), 0, 2.28, 0));
+    group.add(sphere(0.08, mat(0x8ee5ff, 0.28, 0.2), -0.24, 2.34, -0.58));
+    group.add(sphere(0.08, mat(0x8ee5ff, 0.28, 0.2), 0.24, 2.34, -0.58));
+    group.add(box(0.26, 1.15, 0.32, mat(0xd9343e, 0.38, 0.18), -0.88, 1.18, 0));
+    group.add(box(0.26, 1.15, 0.32, mat(0xf0c64a, 0.38, 0.18), 0.88, 1.18, 0));
   }
   group.traverse((child) => {
     if (child.isMesh) {
@@ -658,7 +775,10 @@ function onKey(event, pressed) {
   else if (event.code === "KeyA") input.left = pressed;
   else if (event.code === "KeyD") input.right = pressed;
   else if (event.code === "ShiftLeft" || event.code === "ShiftRight") input.sprint = pressed;
-  else if (event.code === "Space") input.jump = pressed;
+  else if (event.code === "Space") {
+    input.jump = pressed;
+    if (pressed && !event.repeat) input.jumpQueued = true;
+  }
   else if (pressed && event.code.startsWith("Digit")) {
     const index = Number(event.code.replace("Digit", "")) - 1;
     if (index >= 0 && index < TOOL_SLOTS.length) selectSlot(index);
@@ -717,7 +837,7 @@ function toggleMode() {
     state.lives = PLAYER_MAX_LIVES;
     state.shields = PLAYER_MAX_SHIELDS;
   }
-  announce(state.mode === "creative" ? "创造模式：无限方块、飞行、无伤害" : "生存模式：怪物和 Boss 会攻击");
+  announce(state.mode === "creative" ? "创造模式：无限方块、无伤害，但不再飞天" : "生存模式：怪物和 Boss 会攻击");
   updateUI();
 }
 
@@ -756,6 +876,7 @@ function update(dt) {
   updateParticles(dt);
   updateCamera();
   updateUI();
+  updateQaDebug();
   if (state.messageTimer > 0) {
     state.messageTimer -= dt;
     if (state.messageTimer <= 0) messageFeed.classList.remove("is-visible");
@@ -774,21 +895,21 @@ function updatePlayer(dt) {
 
   const speedBoost = state.shoesOn ? 1.5 : 1;
   const sprintBoost = input.sprint ? 1.35 : 1;
-  const modeBoost = state.mode === "creative" ? 1.4 : 1;
+  const modeBoost = state.mode === "creative" ? 1.18 : 1;
   player.velocity.x = move.x * player.speed * speedBoost * sprintBoost * modeBoost;
   player.velocity.z = move.z * player.speed * speedBoost * sprintBoost * modeBoost;
-  player.velocity.y -= state.mode === "creative" ? 0 : 18 * dt;
+  player.velocity.y -= GRAVITY * dt;
 
   const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
-  if (state.mode === "creative") {
-    if (input.jump) player.velocity.y = 5.5;
-    else if (input.sprint) player.velocity.y = -5.5;
-    else player.velocity.y = 0;
-  } else if (player.position.y <= groundY + 0.01) {
+  if (player.position.y <= groundY + 0.22) {
     player.position.y = groundY;
     player.velocity.y = Math.max(0, player.velocity.y);
-    if (input.jump) player.velocity.y = state.ownedAbilities.jumpSmash ? 9 : 7.2;
+    if (input.jumpQueued) {
+      player.velocity.y = state.ownedAbilities.jumpSmash ? 9.4 : JUMP_FORCE;
+      spawnParticles(player.position.clone().add(new THREE.Vector3(0, 0.12, 0)), 0xf6f2df, 12, 0.36);
+    }
   }
+  input.jumpQueued = false;
 
   movePlayerWithCollision(dt);
   player.position.x = THREE.MathUtils.clamp(player.position.x, -HALF_WORLD + 1, HALF_WORLD - 1);
@@ -799,32 +920,34 @@ function updatePlayer(dt) {
 
 function movePlayerWithCollision(dt) {
   const nextX = player.position.x + player.velocity.x * dt;
-  if (state.mode === "creative" || !bodyCollides(nextX, player.position.y, player.position.z, PLAYER_RADIUS)) {
+  if (!bodyCollides(nextX, player.position.y, player.position.z, PLAYER_RADIUS)) {
     player.position.x = nextX;
   } else {
     player.velocity.x = 0;
   }
 
   const nextZ = player.position.z + player.velocity.z * dt;
-  if (state.mode === "creative" || !bodyCollides(player.position.x, player.position.y, nextZ, PLAYER_RADIUS)) {
+  if (!bodyCollides(player.position.x, player.position.y, nextZ, PLAYER_RADIUS)) {
     player.position.z = nextZ;
   } else {
     player.velocity.z = 0;
   }
 
   const nextY = player.position.y + player.velocity.y * dt;
-  if (state.mode === "creative" || !bodyCollides(player.position.x, nextY, player.position.z, PLAYER_RADIUS)) {
+  if (!bodyCollides(player.position.x, nextY, player.position.z, PLAYER_RADIUS)) {
     player.position.y = nextY;
   } else if (player.velocity.y > 0) {
     player.velocity.y = 0;
+  } else {
+    const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
+    if (player.position.y <= groundY + 0.35) player.position.y = groundY;
+    player.velocity.y = 0;
   }
 
-  if (state.mode !== "creative") {
-    const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
-    if (player.position.y < groundY) {
-      player.position.y = groundY;
-      player.velocity.y = 0;
-    }
+  const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
+  if (player.position.y < groundY) {
+    player.position.y = groundY;
+    player.velocity.y = 0;
   }
 }
 
@@ -871,7 +994,7 @@ function updateEnemies(dt) {
   for (const enemy of enemies) {
     if (enemy.defeated) continue;
     const distance = enemy.position.distanceTo(player.position);
-    if (enemy.type.includes("Boss") && !enemy.active && distance < 10) {
+    if (enemy.type.includes("Boss") && !enemy.active && distance < 34) {
       enemy.active = true;
       boss = enemy;
       announce(`${enemy.name} 出现`);
@@ -887,7 +1010,8 @@ function updateEnemies(dt) {
       toPlayer.normalize();
     }
 
-    if (enemy.type !== "turret" && distance > 1.5) {
+    const stopDistance = enemy.type.includes("Boss") ? 2.35 : 1.25;
+    if (enemy.type !== "turret" && distance > stopDistance) {
       moveEnemyWithCollision(enemy, toPlayer, enemy.speed * dt);
       enemy.position.y = getGroundY(enemy.position.x, enemy.position.z);
     }
@@ -902,21 +1026,40 @@ function updateEnemies(dt) {
     }
 
     enemy.group.position.copy(enemy.position);
-    enemy.group.position.y += Math.sin(performance.now() / 260 + enemy.position.x) * 0.03;
+    enemy.group.position.y += Math.sin(performance.now() / 230 + enemy.position.x) * (enemy.type.includes("Boss") ? 0.045 : 0.035);
+    enemy.group.rotation.z = Math.sin(performance.now() / 280 + enemy.position.z) * (enemy.type === "turret" ? 0 : 0.035);
   }
   if (!activeBoss && boss && boss.defeated) boss = null;
 }
 
 function moveEnemyWithCollision(enemy, direction, amount) {
   const radius = enemy.type.includes("Boss") ? 0.9 : 0.42;
-  const nextX = enemy.position.x + direction.x * amount;
-  if (!bodyCollides(nextX, enemy.position.y, enemy.position.z, radius, enemy.type.includes("Boss") ? 2.4 : 1.5)) {
-    enemy.position.x = nextX;
+  const height = enemy.type.includes("Boss") ? 2.35 : 1.45;
+  const sideways = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
+  const candidates = [
+    direction,
+    direction.clone().addScaledVector(sideways, 0.85).normalize(),
+    direction.clone().addScaledVector(sideways, -0.85).normalize(),
+    sideways,
+    sideways.clone().multiplyScalar(-1),
+  ];
+
+  for (const candidate of candidates) {
+    if (tryMoveEnemy(enemy, candidate, amount, radius, height)) return;
   }
-  const nextZ = enemy.position.z + direction.z * amount;
-  if (!bodyCollides(enemy.position.x, enemy.position.y, nextZ, radius, enemy.type.includes("Boss") ? 2.4 : 1.5)) {
-    enemy.position.z = nextZ;
-  }
+}
+
+function tryMoveEnemy(enemy, direction, amount, radius, height) {
+  const nx = enemy.position.x + direction.x * amount;
+  const nz = enemy.position.z + direction.z * amount;
+  const groundY = getGroundY(nx, nz);
+  const stepDelta = groundY - enemy.position.y;
+  if (stepDelta > 1.1 || stepDelta < -2.2) return false;
+  if (bodyCollides(nx, groundY + 0.03, nz, radius, height)) return false;
+  enemy.position.x = nx;
+  enemy.position.z = nz;
+  enemy.position.y = groundY;
+  return true;
 }
 
 function getActiveBoss() {
@@ -1177,15 +1320,28 @@ function render() {
   renderer.render(scene, camera);
 }
 
-function spawnParticles(position, color) {
-  for (let i = 0; i < 9; i += 1) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), mat(color));
+function spawnParticles(position, color, count = 14, force = 1) {
+  for (let i = 0; i < count; i += 1) {
+    const size = 0.045 + Math.random() * 0.075;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.18,
+        roughness: 0.52,
+      }),
+    );
     mesh.position.copy(position);
     scene.add(mesh);
     particles.push({
       mesh,
-      velocity: new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 3, (Math.random() - 0.5) * 3),
-      life: 0.55,
+      velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 3.8 * force,
+        (0.6 + Math.random() * 3.2) * force,
+        (Math.random() - 0.5) * 3.8 * force,
+      ),
+      life: 0.38 + Math.random() * 0.36,
     });
   }
 }
