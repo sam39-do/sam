@@ -6,6 +6,9 @@ const minimapCtx = minimapCanvas?.getContext("2d");
 const lifeValue = document.getElementById("lifeValue");
 const shieldValue = document.getElementById("shieldValue");
 const starValue = document.getElementById("starValue");
+const coordValue = document.getElementById("coordValue");
+const targetValue = document.getElementById("targetValue");
+const fpsValue = document.getElementById("fpsValue");
 const weaponValue = document.getElementById("weaponValue");
 const cameraValue = document.getElementById("cameraValue");
 const bossValue = document.getElementById("bossValue");
@@ -36,7 +39,7 @@ const AUTHOR_ENABLED = URL_PARAMS.has("author");
 const SAVE_KEY = "bear3dSurvivalSandboxV2";
 const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
-const RENDER_RADIUS = 30;
+const RENDER_RADIUS = 14;
 const RENDER_REFRESH_DISTANCE = 6;
 const PLAYER_MAX_LIVES = 100;
 const PLAYER_MAX_SHIELDS = 3;
@@ -48,11 +51,12 @@ const INTERACT_RANGE = 8;
 const CREATIVE_INTERACT_RANGE = 18;
 const GRAPPLE_RANGE = 46;
 const GRAPPLE_PULL = 34;
-const ENEMY_ACTIVE_RADIUS = 180;
-const TITAN_ACTIVE_RADIUS = 260;
-const EPIC_EFFECT_MULTIPLIER = 3;
-const MAX_PARTICLES = 480;
-const MINIMAP_REFRESH_INTERVAL = 0.35;
+const HOOK_SPEED = 88;
+const ENEMY_ACTIVE_RADIUS = 90;
+const TITAN_ACTIVE_RADIUS = 160;
+const EPIC_EFFECT_MULTIPLIER = 2;
+const MAX_PARTICLES = 360;
+const MINIMAP_REFRESH_INTERVAL = 0.45;
 const TARGET_FPS = 60;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
@@ -186,7 +190,7 @@ scene.fog = new THREE.Fog(0xa7dcf3, 92, 220);
 
 const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 220);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-let renderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.55);
+let renderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.15);
 let fpsAverage = TARGET_FPS;
 let fpsAdjustTimer = 0;
 renderer.setPixelRatio(renderPixelRatio);
@@ -202,7 +206,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff1c9, 2.9);
 sun.position.set(18, 30, 14);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.left = -48;
 sun.shadow.camera.right = 48;
 sun.shadow.camera.top = 48;
@@ -223,15 +227,21 @@ const minedBlockKeys = new Set();
 const itemDrops = [];
 const volcanoes = [];
 const blockMeshes = new THREE.Group();
+const cityGroup = new THREE.Group();
+const structureColliders = [];
 const enemies = [];
 const projectiles = [];
 const particles = [];
+const grappleAimMarker = new THREE.Group();
 let boss = null;
 let lastRenderCenter = new THREE.Vector2(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
 let minimapTimer = 0;
 let uiTimer = 0;
 
 scene.add(blockMeshes);
+scene.add(cityGroup);
+setupGrappleAimMarker();
+scene.add(grappleAimMarker);
 
 const state = {
   started: false,
@@ -270,6 +280,7 @@ const player = {
   group: new THREE.Group(),
   speed: 6,
   grappleTarget: null,
+  grappleHook: null,
   grappleTimer: 0,
   windPhase: 0,
 };
@@ -356,6 +367,24 @@ function updateQaDebug() {
     .join("|");
 }
 
+function setupGrappleAimMarker() {
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 18, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff1028 }),
+  );
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(0.34, 0.018, 8, 28),
+    new THREE.MeshBasicMaterial({ color: 0xff1028, transparent: true, opacity: 0.88 }),
+  );
+  const pin = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.9, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff1028, transparent: true, opacity: 0.72 }),
+  );
+  pin.rotation.x = Math.PI / 2;
+  grappleAimMarker.add(core, ring, pin);
+  grappleAimMarker.visible = false;
+}
+
 function setupWorld() {
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE),
@@ -373,6 +402,7 @@ function setupWorld() {
   scene.add(water);
   addAtmosphereDetails();
   setupVolcanoes();
+  setupWalledCity();
   refreshWorldWindow(true);
   addBlock(2, 3, 3, "lamp", true, false, true);
   addBlock(-2, 2, -3, "wood", true, false, true);
@@ -381,19 +411,97 @@ function setupWorld() {
 function setupVolcanoes() {
   volcanoes.length = 0;
   for (let i = 0; i < VOLCANO_COUNT; i += 1) {
-    const angle = (i / VOLCANO_COUNT) * Math.PI * 2 + seededNoise(i, 11) * 0.6;
-    const distance = 140 + seededNoise(i, 29) * (HALF_WORLD - 190);
+    const angle = (i / VOLCANO_COUNT) * Math.PI * 2 + seededNoise(i, 11) * 0.34;
+    const distance = HALF_WORLD - 105 - seededNoise(i, 29) * 58;
     const x = Math.round(Math.cos(angle) * distance);
     const z = Math.round(Math.sin(angle) * distance);
     volcanoes.push({
       x,
       z,
-      radius: 7 + Math.floor(seededNoise(i, 47) * 5),
-      height: 9 + Math.floor(seededNoise(i, 71) * 7),
+      radius: 12 + Math.floor(seededNoise(i, 47) * 5),
+      height: 18 + Math.floor(seededNoise(i, 71) * 9),
       timer: seededNoise(i, 97) * VOLCANO_ERUPTION_INTERVAL,
       erupting: 0,
     });
   }
+}
+
+function setupWalledCity() {
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xb9b0a4, roughness: 0.72, metalness: 0.02 });
+  const gateMat = new THREE.MeshStandardMaterial({ color: 0x5f5147, roughness: 0.64, metalness: 0.08 });
+  const wallHeight = 72;
+  const thickness = 18;
+  const edge = HALF_WORLD - thickness / 2;
+  addStructureBox(WORLD_SIZE, wallHeight, thickness, wallMat, 0, wallHeight / 2, edge, true);
+  addStructureBox(WORLD_SIZE, wallHeight, thickness, wallMat, 0, wallHeight / 2, -edge, true);
+  addStructureBox(thickness, wallHeight, WORLD_SIZE, wallMat, edge, wallHeight / 2, 0, true);
+  addStructureBox(thickness, wallHeight, WORLD_SIZE, wallMat, -edge, wallHeight / 2, 0, true);
+  for (const [x, z, rot] of [
+    [0, edge - 6, 0],
+    [0, -edge + 6, 0],
+    [edge - 6, 0, Math.PI / 2],
+    [-edge + 6, 0, Math.PI / 2],
+  ]) {
+    const gate = addStructureBox(42, 28, 8, gateMat, x, 14, z, false);
+    gate.rotation.y = rot;
+  }
+
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb8afa3, roughness: 0.68 });
+  const plaster = new THREE.MeshStandardMaterial({ color: 0xd7c7ac, roughness: 0.72 });
+  const roof = new THREE.MeshStandardMaterial({ color: 0x6b2f2b, roughness: 0.58 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x8fb3be, emissive: 0x1f3e45, emissiveIntensity: 0.08, roughness: 0.35 });
+  for (let i = 0; i < 54; i += 1) {
+    const angle = i * 2.17;
+    const district = 42 + (i % 9) * 18 + Math.floor(i / 9) * 16;
+    const x = Math.round(Math.cos(angle) * district + seededNoise(i, 803) * 12 - 6);
+    const z = Math.round(Math.sin(angle) * district + seededNoise(i, 907) * 12 - 6);
+    const w = 7 + Math.floor(seededNoise(i, 111) * 5);
+    const d = 7 + Math.floor(seededNoise(i, 211) * 6);
+    const h = 16 + Math.floor(seededNoise(i, 311) * 28);
+    const y = getGroundY(x, z);
+    const body = addStructureBox(w, h, d, i % 3 === 0 ? stone : plaster, x, y + h / 2, z, true);
+    body.userData.kind = "building";
+    const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.72, 5.5, 4), roof);
+    roofMesh.position.set(x, y + h + 2.7, z);
+    roofMesh.rotation.y = Math.PI / 4;
+    roofMesh.castShadow = false;
+    roofMesh.receiveShadow = true;
+    cityGroup.add(roofMesh);
+    for (let floor = 0; floor < Math.min(7, Math.floor(h / 4)); floor += 1) {
+      const wy = y + 3 + floor * 4;
+      addWindowStrip(x, wy, z - d / 2 - 0.04, w * 0.72, glass, 0);
+      addWindowStrip(x, wy, z + d / 2 + 0.04, w * 0.72, glass, 0);
+    }
+  }
+}
+
+function addStructureBox(w, h, d, material, x, y, z, collides) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  cityGroup.add(mesh);
+  if (collides) addStructureCollider(x, y, z, w, h, d);
+  return mesh;
+}
+
+function addWindowStrip(x, y, z, w, material, rotationY) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.7, 0.08), material);
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = rotationY;
+  mesh.castShadow = false;
+  cityGroup.add(mesh);
+}
+
+function addStructureCollider(x, y, z, w, h, d) {
+  structureColliders.push({
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minY: y - h / 2,
+    maxY: y + h / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2,
+  });
 }
 
 function refreshWorldWindow(force = false) {
@@ -432,7 +540,8 @@ function refreshWorldWindow(force = false) {
 function addNaturalColumn(x, z) {
   const height = terrainHeight(x, z);
   const volcano = getVolcanoAt(x, z);
-  for (let y = 0; y <= height; y += 1) {
+  const minVisibleY = Math.max(0, height - 1);
+  for (let y = minVisibleY; y <= height; y += 1) {
     const key = keyFor(x, y, z);
     if (minedBlockKeys.has(key)) continue;
     const type = volcano && y >= height - 1 ? getVolcanoSurfaceType(x, z, volcano) : y === height ? "grass" : y > height - 2 ? "dirt" : "stone";
@@ -1041,7 +1150,7 @@ function createEnemyModel(type) {
   }
   group.traverse((child) => {
     if (child.isMesh) {
-      child.castShadow = true;
+      child.castShadow = false;
       child.receiveShadow = true;
       child.userData.kind = "enemyMesh";
     }
@@ -1413,6 +1522,7 @@ function update(dt) {
   state.invulnerable = Math.max(0, state.invulnerable - dt);
   updateParticles(dt);
   updateCamera();
+  updateGrappleAimMarker();
   uiTimer -= dt;
   if (uiTimer <= 0) {
     uiTimer = 0.12;
@@ -1436,7 +1546,7 @@ function updateAdaptiveQuality(dt) {
   fpsAdjustTimer -= dt;
   if (fpsAdjustTimer > 0) return;
   fpsAdjustTimer = 2.0;
-  const maxRatio = Math.min(window.devicePixelRatio || 1, 1.6);
+  const maxRatio = Math.min(window.devicePixelRatio || 1, 1.25);
   if (fpsAverage < 44 && renderPixelRatio > 1.0) {
     renderPixelRatio = Math.max(1.0, renderPixelRatio - 0.15);
     renderer.setPixelRatio(renderPixelRatio);
@@ -1446,6 +1556,32 @@ function updateAdaptiveQuality(dt) {
     renderer.setPixelRatio(renderPixelRatio);
     resize();
   }
+}
+
+function updateGrappleAimMarker() {
+  if (!state.odmEquipped || !state.started) {
+    grappleAimMarker.visible = false;
+    if (targetValue) targetValue.textContent = "--";
+    return;
+  }
+  const origin = player.position.clone().add(new THREE.Vector3(0, 0.82, 0));
+  const aim = getGrappleAim(origin, getLookDirection(), true);
+  grappleAimMarker.visible = true;
+  grappleAimMarker.position.copy(aim.point);
+  if (targetValue) targetValue.textContent = `${aim.locked ? "" : "空 "} ${formatCoord(aim.point)}`.trim();
+  grappleAimMarker.lookAt(camera.position);
+  const scale = aim.locked ? 1 : 0.62;
+  grappleAimMarker.scale.setScalar(scale);
+  grappleAimMarker.traverse((child) => {
+    if (child.material) {
+      child.material.opacity = aim.locked ? 0.92 : 0.38;
+      child.material.transparent = true;
+    }
+  });
+}
+
+function formatCoord(vector) {
+  return `${Math.round(vector.x)},${Math.round(vector.y)},${Math.round(vector.z)}`;
 }
 
 function updateSurvivalCreativeSurge(dt) {
@@ -1477,7 +1613,7 @@ function updatePlayer(dt) {
   player.velocity.x = move.x * player.speed * speedBoost * sprintBoost * modeBoost;
   player.velocity.z = move.z * player.speed * speedBoost * sprintBoost * modeBoost;
   player.velocity.y -= GRAVITY * dt;
-  updateGrapplePull(dt);
+  updateGrappleSystem(dt);
 
   const groundY = getGroundY(player.position.x, player.position.z) + 0.03;
   if (player.position.y <= groundY + 0.22) {
@@ -1498,6 +1634,40 @@ function updatePlayer(dt) {
   updateCape(dt);
 }
 
+function updateGrappleSystem(dt) {
+  updateGrappleHookProjectile(dt);
+  updateGrapplePull(dt);
+}
+
+function updateGrappleHookProjectile(dt) {
+  const hook = player.grappleHook;
+  if (!hook) return;
+  hook.life -= dt;
+  const toTarget = hook.target.clone().sub(hook.position);
+  const distance = toTarget.length();
+  const step = HOOK_SPEED * dt;
+  if (distance <= step || hook.life <= 0) {
+    hook.position.copy(hook.target);
+    hook.mesh.position.copy(hook.position);
+    scene.remove(hook.mesh);
+    player.grappleHook = null;
+    if (hook.locked) {
+      player.grappleTarget = hook.target.clone();
+      player.grappleTimer = 1.25;
+      spawnGrappleLine(player.position.clone().add(new THREE.Vector3(0, 0.82, 0)), hook.target, 0.32);
+      spawnParticles(hook.target, 0xc41220, 18, 2.4, "bloodWind");
+      announce(`钩爪插中 ${formatCoord(hook.target)}`);
+    } else {
+      announce("钩爪未插中目标");
+    }
+    return;
+  }
+  hook.position.addScaledVector(toTarget.normalize(), step);
+  hook.mesh.position.copy(hook.position);
+  hook.mesh.lookAt(hook.target);
+  spawnGrappleLine(player.position.clone().add(new THREE.Vector3(0, 0.82, 0)), hook.position, 0.06);
+}
+
 function updateGrapplePull(dt) {
   if (!state.odmEquipped || !player.grappleTarget) return;
   player.grappleTimer = Math.max(0, player.grappleTimer - dt);
@@ -1512,10 +1682,17 @@ function updateGrapplePull(dt) {
   player.velocity.x += pull.x;
   player.velocity.y = Math.max(player.velocity.y, pull.y * 0.72 + 5.5);
   player.velocity.z += pull.z;
+  spawnGrappleLine(hookPoint, player.grappleTarget, 0.08);
   spawnParticles(hookPoint, 0x9b111e, 4, 1.2, "bloodWind");
 }
 
 function movePlayerWithCollision(dt) {
+  const steps = Math.max(1, Math.ceil(player.velocity.length() * dt / 0.42));
+  const stepDt = dt / steps;
+  for (let i = 0; i < steps; i += 1) movePlayerCollisionStep(stepDt);
+}
+
+function movePlayerCollisionStep(dt) {
   const nextX = player.position.x + player.velocity.x * dt;
   if (!bodyCollides(nextX, player.position.y, player.position.z, PLAYER_RADIUS)) {
     player.position.x = nextX;
@@ -1549,6 +1726,7 @@ function movePlayerWithCollision(dt) {
 }
 
 function bodyCollides(x, y, z, radius = 0.36, height = PLAYER_HEIGHT) {
+  if (structureCollides(x, y, z, radius, height)) return true;
   const minX = Math.floor(x - radius - 0.5);
   const maxX = Math.ceil(x + radius + 0.5);
   const minY = Math.floor(y + 0.05);
@@ -1576,6 +1754,20 @@ function bodyCollides(x, y, z, radius = 0.36, height = PLAYER_HEIGHT) {
         if (overlaps) return true;
       }
     }
+  }
+  return false;
+}
+
+function structureCollides(x, y, z, radius, height) {
+  for (const box of structureColliders) {
+    const overlaps =
+      x + radius > box.minX &&
+      x - radius < box.maxX &&
+      y + height > box.minY &&
+      y + 0.08 < box.maxY &&
+      z + radius > box.minZ &&
+      z - radius < box.maxZ;
+    if (overlaps) return true;
   }
   return false;
 }
@@ -1714,22 +1906,52 @@ function useSelectedTool() {
 
 function useGrappleHook() {
   if (!state.odmEquipped || state.grappleCooldown > 0) return;
-  state.grappleCooldown = 0.16;
+  state.grappleCooldown = 0.18;
   state.weaponMode = "odm";
   const origin = player.position.clone().add(new THREE.Vector3(0, 1.05, 0));
   const direction = getLookDirection();
-  const target = getGrappleTarget(origin, direction);
-  player.grappleTarget = target;
-  player.grappleTimer = 1.15;
-  const pull = target.clone().sub(origin).normalize().multiplyScalar(16);
-  player.velocity.add(pull);
-  spawnGrappleLine(origin, target);
-  spawnParticles(origin.clone().addScaledVector(direction, 0.6), 0x9b111e, 28, 2.8, "bloodWind");
+  const aim = getGrappleAim(origin, direction, true);
+  if (player.grappleHook?.mesh) scene.remove(player.grappleHook.mesh);
+  player.grappleTarget = null;
+  const hookMesh = createHookMesh();
+  hookMesh.position.copy(origin);
+  hookMesh.lookAt(aim.point);
+  scene.add(hookMesh);
+  player.grappleHook = {
+    mesh: hookMesh,
+    position: origin.clone(),
+    target: aim.point.clone(),
+    locked: aim.locked,
+    life: origin.distanceTo(aim.point) / HOOK_SPEED + 0.22,
+  };
+  spawnParticles(origin.clone().addScaledVector(direction, 0.6), 0x9b111e, 16, 2.4, "bloodWind");
+  announce(`钩爪发射 ${formatCoord(aim.point)}`);
 }
 
-function getGrappleTarget(origin, direction) {
-  const hit = raycastBlock();
-  if (hit && hit.distance <= GRAPPLE_RANGE) return hit.point.clone();
+function createHookMesh() {
+  const hook = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.34, metalness: 0.5 });
+  const red = new THREE.MeshBasicMaterial({ color: 0xc41220 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.48, 8), metal);
+  shaft.rotation.x = Math.PI / 2;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 10), red);
+  tip.position.z = -0.32;
+  tip.rotation.x = -Math.PI / 2;
+  hook.add(shaft, tip);
+  return hook;
+}
+
+function getGrappleAim(origin, direction, includeFallback = true) {
+  raycaster.set(origin, direction);
+  raycaster.far = GRAPPLE_RANGE;
+  const worldHits = raycaster
+    .intersectObjects([...blockMeshes.children, ...cityGroup.children], false)
+    .filter((hit) => hit.distance <= GRAPPLE_RANGE);
+  if (worldHits.length) {
+    raycaster.far = Infinity;
+    return { point: worldHits[0].point.clone(), locked: true, label: "structure" };
+  }
+  raycaster.far = Infinity;
   let best = GRAPPLE_RANGE;
   let target = null;
   for (const enemy of enemies) {
@@ -1745,7 +1967,8 @@ function getGrappleTarget(origin, direction) {
       target = point;
     }
   }
-  return target || origin.clone().addScaledVector(direction, GRAPPLE_RANGE * 0.82);
+  if (target) return { point: target, locked: true, label: "enemy" };
+  return { point: origin.clone().addScaledVector(direction, GRAPPLE_RANGE * 0.82), locked: false, label: "air" };
 }
 
 function bladeTitanNapeAttack() {
@@ -1792,11 +2015,37 @@ function getTitanBackVector(enemy) {
 
 function swingOdmBlade(target) {
   const origin = player.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+  spawnBladeFlash(origin, target);
   spawnGrappleLine(origin, target);
   spawnParticles(target, 0xc41220, 38, 3.6, "bloodWind");
 }
 
-function spawnGrappleLine(origin, target) {
+function spawnBladeFlash(origin, target) {
+  const midpoint = origin.clone().lerp(target, 0.52);
+  const length = Math.max(0.6, origin.distanceTo(target));
+  const blade = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.012, length, 10),
+    new THREE.MeshStandardMaterial({
+      color: 0xff2034,
+      emissive: 0xc41220,
+      emissiveIntensity: 1.7,
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.18,
+    }),
+  );
+  blade.position.copy(midpoint);
+  const direction = target.clone().sub(origin).normalize();
+  blade.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+  scene.add(blade);
+  particles.push({
+    mesh: blade,
+    velocity: direction.multiplyScalar(0.8),
+    life: 0.16,
+  });
+}
+
+function spawnGrappleLine(origin, target, life = 0.22) {
   const geometry = new THREE.BufferGeometry().setFromPoints([origin, target]);
   const line = new THREE.Line(
     geometry,
@@ -1810,7 +2059,7 @@ function spawnGrappleLine(origin, target) {
   particles.push({
     mesh: line,
     velocity: new THREE.Vector3(),
-    life: 0.22,
+    life,
   });
 }
 
@@ -2392,6 +2641,8 @@ function updateUI() {
   const starText = state.authorMode ? "∞" : state.stars.toString();
   starValue.textContent = starText;
   shopStars.textContent = starText;
+  if (coordValue) coordValue.textContent = formatCoord(player.position);
+  if (fpsValue) fpsValue.textContent = Math.max(1, Math.round(fpsAverage)).toString();
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   weaponValue.textContent = state.odmEquipped
     ? "赤风立体机动"
