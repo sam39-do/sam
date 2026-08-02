@@ -432,6 +432,19 @@ button {
   text-align: center;
 }
 
+.load-error {
+  display: none;
+  padding: 10px 12px;
+  border: 1px solid rgba(211, 92, 74, 0.5);
+  border-radius: 8px;
+  color: #fff8d8;
+  background: rgba(120, 32, 22, 0.65);
+}
+
+.has-load-error .load-error {
+  display: block;
+}
+
 #playButton {
   min-width: 160px;
   min-height: 46px;

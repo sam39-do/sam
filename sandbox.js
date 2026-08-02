@@ -1,10 +1,11 @@
-import * as THREE from "https://esm.sh/three@0.160.1";
+import * as THREE from "./vendor-three.mjs";
 
 const canvas = document.getElementById("gameCanvas");
 const lifeValue = document.getElementById("lifeValue");
 const shieldValue = document.getElementById("shieldValue");
 const starValue = document.getElementById("starValue");
 const weaponValue = document.getElementById("weaponValue");
+const cameraValue = document.getElementById("cameraValue");
 const bossValue = document.getElementById("bossValue");
 const bossHud = document.getElementById("bossHud");
 const bossName = document.getElementById("bossName");
@@ -166,6 +167,7 @@ const state = {
   equippedAbility: "none",
   shoesOn: false,
   weaponMode: "racket",
+  cameraMode: "third",
   inventory: Object.fromEntries(Object.entries(BLOCKS).map(([id, item]) => [id, item.count])),
   ownedSkins: { bear: true },
   ownedRackets: { starter: true },
@@ -670,6 +672,8 @@ function onKey(event, pressed) {
     fireProjectile(true);
   } else if (pressed && event.code === "KeyC") {
     toggleMode();
+  } else if (pressed && event.code === "KeyY") {
+    toggleCameraMode();
   } else if (pressed && event.code === "KeyG") {
     announce("Forehand Drive / Backhand Smash / Drop Shot");
   } else if (pressed && event.code === "KeyI") {
@@ -691,7 +695,7 @@ function onMouseMove(event) {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   if (document.pointerLockElement === canvas) {
     state.yaw -= event.movementX * 0.0024;
-    state.pitch = THREE.MathUtils.clamp(state.pitch - event.movementY * 0.0018, -0.9, -0.08);
+    state.pitch = THREE.MathUtils.clamp(state.pitch - event.movementY * 0.0018, -0.95, 0.55);
   }
 }
 
@@ -714,6 +718,13 @@ function toggleMode() {
     state.shields = PLAYER_MAX_SHIELDS;
   }
   announce(state.mode === "creative" ? "创造模式：无限方块、飞行、无伤害" : "生存模式：怪物和 Boss 会攻击");
+  updateUI();
+}
+
+function toggleCameraMode() {
+  state.cameraMode = state.cameraMode === "first" ? "third" : "first";
+  player.group.visible = state.cameraMode !== "first";
+  announce(state.cameraMode === "first" ? "第一视角" : "第三视角");
   updateUI();
 }
 
@@ -1119,16 +1130,31 @@ function blockOverlapsPlayer(x, y, z) {
 }
 
 function raycastBlock() {
-  raycaster.setFromCamera(pointer, camera);
+  const aimPoint = state.cameraMode === "first" ? new THREE.Vector2(0, 0) : pointer;
+  raycaster.setFromCamera(aimPoint, camera);
   const hits = raycaster.intersectObjects(blockMeshes.children, false);
   return hits[0] || null;
 }
 
 function getLookDirection() {
-  return new THREE.Vector3(Math.sin(state.yaw), Math.sin(-state.pitch) * 0.25, Math.cos(state.yaw)).normalize();
+  const pitchStrength = state.cameraMode === "first" ? 1 : 0.35;
+  return new THREE.Vector3(
+    Math.sin(state.yaw),
+    Math.sin(-state.pitch) * pitchStrength,
+    Math.cos(state.yaw),
+  ).normalize();
 }
 
 function updateCamera() {
+  player.group.visible = state.cameraMode !== "first";
+  if (state.cameraMode === "first") {
+    const eye = player.position.clone().add(new THREE.Vector3(0, 1.55, 0));
+    const direction = new THREE.Vector3(Math.sin(state.yaw), Math.sin(-state.pitch), Math.cos(state.yaw)).normalize();
+    camera.position.copy(eye);
+    camera.lookAt(eye.clone().add(direction));
+    return;
+  }
+
   const cameraOffset = new THREE.Vector3(
     -Math.sin(state.yaw) * 7,
     4.3 + Math.sin(-state.pitch) * 2.4,
@@ -1192,6 +1218,7 @@ function updateUI() {
   shopStars.textContent = state.stars.toString();
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   weaponValue.textContent = state.weaponMode === "pistol" ? "手枪/伙伴" : SHOP_RACKETS[state.equippedRacket].name;
+  if (cameraValue) cameraValue.textContent = state.cameraMode === "first" ? "第一" : "第三";
   const activeBoss = getActiveBoss();
   bossValue.textContent = activeBoss ? activeBoss.name : "未激活";
 
@@ -1230,6 +1257,7 @@ function saveGame(showMessage) {
     equippedAbility: state.equippedAbility,
     shoesOn: state.shoesOn,
     weaponMode: state.weaponMode,
+    cameraMode: state.cameraMode,
     inventory: state.inventory,
     ownedSkins: state.ownedSkins,
     ownedRackets: state.ownedRackets,
@@ -1260,6 +1288,7 @@ function loadGame() {
       equippedAbility: save.equippedAbility || "none",
       shoesOn: Boolean(save.shoesOn),
       weaponMode: save.weaponMode || "racket",
+      cameraMode: save.cameraMode === "first" ? "first" : "third",
       inventory: { ...state.inventory, ...(save.inventory || {}) },
       ownedSkins: { bear: true, ...(save.ownedSkins || {}) },
       ownedRackets: { starter: true, ...(save.ownedRackets || {}) },
@@ -1267,6 +1296,7 @@ function loadGame() {
     });
     if (Array.isArray(save.player)) player.position.fromArray(save.player);
     rebuildPlayerModel();
+    player.group.visible = state.cameraMode !== "first";
     announce("已读取上次 3D 生存世界");
   } catch {
     announce("存档读取失败，已进入新世界");

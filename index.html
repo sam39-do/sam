@@ -24,6 +24,7 @@
           <div class="hud-pill"><span>护盾</span><strong id="shieldValue">0</strong></div>
           <div class="hud-pill"><span>星星</span><strong id="starValue">0</strong></div>
           <div class="hud-pill"><span>武器</span><strong id="weaponValue">球拍</strong></div>
+          <div class="hud-pill"><span>视角</span><strong id="cameraValue">第三</strong></div>
           <div class="hud-pill"><span>Boss</span><strong id="bossValue">未激活</strong></div>
         </header>
 
@@ -73,15 +74,20 @@
         <div class="intro-panel" id="introPanel">
           <h1>小熊 3D 生存沙盒</h1>
           <p>旧武器、商店、怪兽和 Boss 已回到生存模式。现在是立体沙盒世界。</p>
+          <p class="load-error" id="loadError">游戏文件没有加载成功。请刷新页面，或用主页链接打开。</p>
           <button id="playButton" type="button">进入生存模式</button>
         </div>
 
         <div class="control-help">
-          WASD 移动 · 鼠标转视角 · 左键攻击/挖掘 · 右键放置 · 1-8 切工具 · C 创造/生存 · Q 切手枪/小猪 · E 射击 · G 换打法 · I 跑鞋
+          WASD 移动 · 鼠标转视角 · 左键攻击/挖掘 · 右键放置 · 1-8 切工具 · C 创造/生存 · Y 第一/第三视角 · Q 切手枪/小猪 · E 射击 · G 换打法 · I 跑鞋
         </div>
       </section>
     </main>
 
+    <script>
+      window.addEventListener("error", () => document.body.classList.add("has-load-error"));
+      window.addEventListener("unhandledrejection", () => document.body.classList.add("has-load-error"));
+    </script>
     <script type="module" src="sandbox.js"></script>
   </body>
 </html>
