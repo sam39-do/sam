@@ -1,4 +1,4 @@
-import * as THREE from "./vendor-three.mjs?v=20260906-hotfix2";
+import * as THREE from "./vendor-three.mjs?v=20260906-hotfix3";
 
 const canvas = document.getElementById("gameCanvas");
 const minimapCanvas = document.getElementById("minimapCanvas");
@@ -39,11 +39,11 @@ const spinButton = document.getElementById("spinButton");
 const URL_PARAMS = new URLSearchParams(window.location.search);
 const QA_ENABLED = URL_PARAMS.has("qa");
 const AUTHOR_ENABLED = URL_PARAMS.has("author");
-const SAVE_KEY = "bear3dSurvivalSandboxV2";
+const SAVE_KEY = "bear3dSurvivalSandboxV3";
 const WORLD_SIZE = 2880;
 const HALF_WORLD = WORLD_SIZE / 2;
-const RENDER_RADIUS = 11;
-const RENDER_REFRESH_DISTANCE = 6;
+const RENDER_RADIUS = 10;
+const RENDER_REFRESH_DISTANCE = 5;
 const PLAYER_MAX_LIVES = 100;
 const PLAYER_MAX_SHIELDS = 3;
 const PLAYER_RADIUS = 0.36;
@@ -58,11 +58,13 @@ const HOOK_SPEED = 88;
 const ENEMY_ACTIVE_RADIUS = 78;
 const TITAN_ACTIVE_RADIUS = 132;
 const EPIC_EFFECT_MULTIPLIER = 2;
-const MAX_PARTICLES = 360;
+const MAX_PARTICLES = 300;
 const MINIMAP_REFRESH_INTERVAL = 0.45;
 const CITY_CULL_INTERVAL = 0.42;
-const CITY_VISIBLE_RADIUS = 205;
+const CITY_VISIBLE_RADIUS = 165;
 const CITY_VISIBLE_RADIUS_SQ = CITY_VISIBLE_RADIUS * CITY_VISIBLE_RADIUS;
+const CITY_TREE_FREE_RADIUS = HALF_WORLD * 0.5;
+const TREE_KEEP_THRESHOLD = 0.9984;
 const TARGET_FPS = 60;
 const SURVIVAL_CREATIVE_SURGE_CHANCE = 0.2;
 const SURVIVAL_CREATIVE_SURGE_DURATION = 12;
@@ -196,7 +198,7 @@ scene.fog = new THREE.Fog(0xa7dcf3, 92, 220);
 
 const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 220);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-let renderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.15);
+let renderPixelRatio = Math.min(window.devicePixelRatio || 1, 1.05);
 let fpsAverage = TARGET_FPS;
 let fpsAdjustTimer = 0;
 renderer.setPixelRatio(renderPixelRatio);
@@ -363,6 +365,7 @@ function exposeQaHooks() {
       enemyCount: enemies.filter((enemy) => !enemy.defeated).length,
       titanCount: enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length,
       activeEnemyCount: enemies.filter((enemy) => !enemy.defeated && enemy.active && enemy.group.visible).length,
+      nearbyTreeBlocks: countNearbyTreeBlocks(120),
       fps: Number(fpsAverage.toFixed(1)),
       grounded: player.grounded,
       colliding: bodyCollides(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS, PLAYER_HEIGHT),
@@ -392,6 +395,7 @@ function updateQaDebug() {
   document.body.dataset.enemyCount = String(enemies.filter((enemy) => !enemy.defeated).length);
   document.body.dataset.titanCount = String(enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length);
   document.body.dataset.activeEnemyCount = String(enemies.filter((enemy) => !enemy.defeated && enemy.active && enemy.group.visible).length);
+  document.body.dataset.nearbyTreeBlocks = String(countNearbyTreeBlocks(120));
   document.body.dataset.fps = fpsAverage.toFixed(1);
   document.body.dataset.grounded = String(player.grounded);
   document.body.dataset.colliding = String(bodyCollides(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS, PLAYER_HEIGHT));
@@ -401,6 +405,19 @@ function updateQaDebug() {
     .slice(0, 6)
     .map((enemy) => `${enemy.type}:${enemy.position.x.toFixed(2)},${enemy.position.z.toFixed(2)}`)
     .join("|");
+}
+
+function countNearbyTreeBlocks(radius) {
+  let count = 0;
+  const radiusSq = radius * radius;
+  for (const mesh of blocks.values()) {
+    const data = mesh.userData;
+    if (!data.natural || data.type !== "wood") continue;
+    const dx = data.x - player.position.x;
+    const dz = data.z - player.position.z;
+    if (dx * dx + dz * dz <= radiusSq) count += 1;
+  }
+  return count;
 }
 
 function setupGrappleAimMarker() {
@@ -440,8 +457,6 @@ function setupWorld() {
   setupVolcanoes();
   setupWalledCity();
   refreshWorldWindow(true);
-  addBlock(2, 3, 3, "lamp", true, false, true);
-  addBlock(-2, 2, -3, "wood", true, false, true);
 }
 
 function setupVolcanoes() {
@@ -728,7 +743,8 @@ function terrainHeight(x, z) {
 
 function shouldHaveTree(x, z) {
   if (getVolcanoAt(x, z)) return false;
-  return seededNoise(x * 3, z * 5) > 0.984;
+  if (Math.hypot(x, z) < CITY_TREE_FREE_RADIUS) return false;
+  return seededNoise(x * 3, z * 5) > TREE_KEEP_THRESHOLD;
 }
 
 function getVolcanoAt(x, z) {
@@ -1724,8 +1740,8 @@ function updateAdaptiveQuality(dt) {
   if (fpsAdjustTimer > 0) return;
   fpsAdjustTimer = 2.0;
   const maxRatio = Math.min(window.devicePixelRatio || 1, 1.25);
-  if (fpsAverage < 44 && renderPixelRatio > 1.0) {
-    renderPixelRatio = Math.max(1.0, renderPixelRatio - 0.15);
+  if (fpsAverage < 50 && renderPixelRatio > 0.85) {
+    renderPixelRatio = Math.max(0.85, renderPixelRatio - 0.2);
     renderer.setPixelRatio(renderPixelRatio);
     resize();
   } else if (fpsAverage > 58 && renderPixelRatio < maxRatio) {
