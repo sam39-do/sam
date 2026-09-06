@@ -1,4 +1,4 @@
-import * as THREE from "./vendor-three.mjs";
+import * as THREE from "./vendor-three.mjs?v=20260906-hotfix1";
 
 const canvas = document.getElementById("gameCanvas");
 const minimapCanvas = document.getElementById("minimapCanvas");
@@ -353,6 +353,7 @@ function exposeQaHooks() {
     }
     return {
       mode: state.mode,
+      build: window.__JIUXIONG_BUILD__ || "dev",
       playerX: Number(player.position.x.toFixed(3)),
       playerY: Number(player.position.y.toFixed(3)),
       playerZ: Number(player.position.z.toFixed(3)),
@@ -384,6 +385,7 @@ function updateQaDebug() {
   document.body.dataset.playerY = player.position.y.toFixed(3);
   document.body.dataset.playerZ = player.position.z.toFixed(3);
   document.body.dataset.mode = state.mode;
+  document.body.dataset.build = window.__JIUXIONG_BUILD__ || "dev";
   document.body.dataset.volcanoCount = String(volcanoes.length);
   document.body.dataset.buildingCount = String(structureColliders.length);
   document.body.dataset.enemyCount = String(enemies.filter((enemy) => !enemy.defeated).length);
