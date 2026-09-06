@@ -10,6 +10,7 @@ const coordValue = document.getElementById("coordValue");
 const targetValue = document.getElementById("targetValue");
 const fpsValue = document.getElementById("fpsValue");
 const statusValue = document.getElementById("statusValue");
+const objectiveValue = document.getElementById("objectiveValue");
 const weaponValue = document.getElementById("weaponValue");
 const cameraValue = document.getElementById("cameraValue");
 const bossValue = document.getElementById("bossValue");
@@ -278,6 +279,10 @@ const state = {
   survivalCreativeSurge: 0,
   creativeRollTimer: 20,
   lavaBurn: 0,
+  blocksMined: 0,
+  blocksPlaced: 0,
+  kills: 0,
+  playTime: 0,
 };
 
 const player = {
@@ -286,6 +291,8 @@ const player = {
   group: new THREE.Group(),
   speed: 6,
   grounded: false,
+  stuckTimer: 0,
+  lastSafePosition: new THREE.Vector3(0, 1.2, 0),
   grappleTarget: null,
   grappleHook: null,
   grappleTimer: 0,
@@ -315,6 +322,7 @@ function init() {
   setupUI();
   bindEvents();
   loadGame();
+  updateCityVisibility(CITY_CULL_INTERVAL);
   exposeQaHooks();
   resize();
   updateUI();
@@ -325,6 +333,14 @@ function exposeQaHooks() {
   if (!QA_ENABLED) return;
   window.__bearSandboxDebug = (command = "state") => {
     if (command === "teleport") teleportToNearestVolcano();
+    if (command === "forceStuck") {
+      const box = structureColliders.find((entry) => entry.maxX - entry.minX < 40 && entry.maxZ - entry.minZ < 40);
+      if (box) {
+        player.position.set((box.minX + box.maxX) / 2, box.minY + 0.2, (box.minZ + box.maxZ) / 2);
+        player.velocity.set(0, 0, 0);
+        player.stuckTimer = 0.3;
+      }
+    }
     if (command === "moveVectors") {
       const forward = new THREE.Vector3(Math.sin(state.yaw), 0, Math.cos(state.yaw));
       const right = new THREE.Vector3(-Math.cos(state.yaw), 0, Math.sin(state.yaw));
@@ -344,7 +360,11 @@ function exposeQaHooks() {
       buildingCount: structureColliders.length,
       enemyCount: enemies.filter((enemy) => !enemy.defeated).length,
       titanCount: enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length,
+      activeEnemyCount: enemies.filter((enemy) => !enemy.defeated && enemy.active && enemy.group.visible).length,
       fps: Number(fpsAverage.toFixed(1)),
+      grounded: player.grounded,
+      colliding: bodyCollides(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS, PLAYER_HEIGHT),
+      objective: getCurrentObjective(),
       enemies: enemies
         .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
         .slice(0, 6)
@@ -368,7 +388,11 @@ function updateQaDebug() {
   document.body.dataset.buildingCount = String(structureColliders.length);
   document.body.dataset.enemyCount = String(enemies.filter((enemy) => !enemy.defeated).length);
   document.body.dataset.titanCount = String(enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length);
+  document.body.dataset.activeEnemyCount = String(enemies.filter((enemy) => !enemy.defeated && enemy.active && enemy.group.visible).length);
   document.body.dataset.fps = fpsAverage.toFixed(1);
+  document.body.dataset.grounded = String(player.grounded);
+  document.body.dataset.colliding = String(bodyCollides(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS, PLAYER_HEIGHT));
+  document.body.dataset.objective = getCurrentObjective();
   document.body.dataset.enemySample = enemies
     .filter((enemy) => !enemy.defeated && enemy.active && enemy.type !== "turret")
     .slice(0, 6)
@@ -460,10 +484,14 @@ function setupWalledCity() {
   const brick = new THREE.MeshStandardMaterial({ color: 0xa77b62, roughness: 0.7 });
   const roof = new THREE.MeshStandardMaterial({ color: 0x6b2f2b, roughness: 0.58 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x8fb3be, emissive: 0x1f3e45, emissiveIntensity: 0.08, roughness: 0.35 });
+  const road = new THREE.MeshStandardMaterial({ color: 0x4f5652, roughness: 0.82, metalness: 0.02 });
+  const lamp = new THREE.MeshStandardMaterial({ color: 0xf0c64a, emissive: 0x8a5d12, emissiveIntensity: 0.85, roughness: 0.32 });
+
+  addCityStreets(road, lamp);
 
   generateCityDistrict({
     count: 230,
-    radiusMin: 34,
+    radiusMin: 78,
     radiusMax: HALF_WORLD * 0.48,
     minSize: 8,
     maxSize: 17,
@@ -487,6 +515,31 @@ function setupWalledCity() {
     roof,
     glass,
   });
+}
+
+function addCityStreets(roadMaterial, lampMaterial) {
+  const y = highestBlockY(0, 0) + 0.025;
+  const length = HALF_WORLD * 0.96;
+  for (let offset = -320; offset <= 320; offset += 80) {
+    const eastWest = addStructureBox(length, 0.05, 9, roadMaterial, 0, y, offset, false);
+    eastWest.userData.kind = "cityStreet";
+    eastWest.userData.cityCull = true;
+    const northSouth = addStructureBox(9, 0.05, length, roadMaterial, offset, y, 0, false);
+    northSouth.userData.kind = "cityStreet";
+    northSouth.userData.cityCull = true;
+  }
+  const plaza = addStructureBox(58, 0.06, 58, roadMaterial, 0, y + 0.01, 0, false);
+  plaza.userData.kind = "safePlaza";
+  for (let i = 0; i < 28; i += 1) {
+    const angle = (i / 28) * Math.PI * 2;
+    const radius = 34 + (i % 2) * 18;
+    const x = Math.round(Math.cos(angle) * radius);
+    const z = Math.round(Math.sin(angle) * radius);
+    const pole = addStructureBox(0.22, 2.6, 0.22, roadMaterial, x, y + 1.3, z, false);
+    pole.userData.kind = "streetLamp";
+    const glow = addStructureBox(0.62, 0.18, 0.62, lampMaterial, x, y + 2.72, z, false);
+    glow.userData.kind = "streetLampGlow";
+  }
 }
 
 function generateCityDistrict(config) {
@@ -655,6 +708,12 @@ function addAtmosphereDetails() {
 function terrainHeight(x, z) {
   const wave = Math.sin(x * 0.08) + Math.cos(z * 0.075) + Math.sin((x + z) * 0.045);
   let height = Math.max(0, Math.floor(2 + wave * 1.4 + seededNoise(x, z) * 2.2));
+  const centerDistance = Math.hypot(x, z);
+  if (centerDistance < 58) {
+    height = 3;
+  } else if (centerDistance < 94) {
+    height = Math.min(height, 3 + Math.floor((centerDistance - 58) / 12));
+  }
   const volcano = getVolcanoAt(x, z);
   if (volcano) {
     const distance = Math.hypot(x - volcano.x, z - volcano.z);
@@ -743,6 +802,7 @@ function removeBlock(mesh) {
   blocks.delete(key);
   if (mesh.userData.natural) minedBlockKeys.add(key);
   placedBlockKeys.delete(key);
+  state.blocksMined += 1;
   spawnItemDrop(type, mesh.position.clone());
   spawnParticles(mesh.position, BLOCKS[type]?.color || 0xffffff, 90, 2.8);
   announce(`${BLOCKS[type]?.name || "方块"} 掉落`);
@@ -1535,11 +1595,45 @@ function teleportToNearestVolcano() {
   const x = Math.round(nearest.x + Math.cos(angle) * safeDistance);
   const z = Math.round(nearest.z + Math.sin(angle) * safeDistance);
   spawnParticles(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x8ee5ff, 60, 3.4, "teleport");
-  player.position.set(x, highestBlockY(x, z) + 0.08, z);
-  player.velocity.set(0, 0, 0);
-  refreshWorldWindow(true);
+  placePlayerSafely(x, z, 18);
   spawnParticles(player.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xf0c64a, 80, 3.8, "teleport");
   announce("已传送到最近的火山");
+}
+
+function placePlayerSafely(x, z, searchRadius = 8) {
+  const safe = findSafePlayerPosition(x, z, searchRadius) || new THREE.Vector3(0, highestBlockY(0, 0) + 0.03, 0);
+  player.position.copy(safe);
+  player.velocity.set(0, 0, 0);
+  player.stuckTimer = 0;
+  player.lastSafePosition.copy(safe);
+  refreshWorldWindow(true);
+}
+
+function findSafePlayerPosition(x, z, searchRadius = 8) {
+  const clampedX = THREE.MathUtils.clamp(Math.round(x), -HALF_WORLD + 2, HALF_WORLD - 2);
+  const clampedZ = THREE.MathUtils.clamp(Math.round(z), -HALF_WORLD + 2, HALF_WORLD - 2);
+  const samples = [{ x: clampedX, z: clampedZ }];
+  for (let radius = 1; radius <= searchRadius; radius += 1) {
+    const steps = Math.max(12, radius * 8);
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (i / steps) * Math.PI * 2;
+      samples.push({
+        x: Math.round(clampedX + Math.cos(angle) * radius),
+        z: Math.round(clampedZ + Math.sin(angle) * radius),
+      });
+    }
+  }
+  const seen = new Set();
+  for (const sample of samples) {
+    const sx = THREE.MathUtils.clamp(sample.x, -HALF_WORLD + 2, HALF_WORLD - 2);
+    const sz = THREE.MathUtils.clamp(sample.z, -HALF_WORLD + 2, HALF_WORLD - 2);
+    const key = `${sx},${sz}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const sy = getGroundY(sx, sz) + 0.03;
+    if (!bodyCollides(sx, sy, sz, PLAYER_RADIUS, PLAYER_HEIGHT)) return new THREE.Vector3(sx, sy, sz);
+  }
+  return null;
 }
 
 function toggleOdmGear() {
@@ -1585,6 +1679,7 @@ function loop() {
 function update(dt) {
   updateAdaptiveQuality(dt);
   if (state.started) {
+    state.playTime += dt;
     updateSurvivalCreativeSurge(dt);
     updatePlayer(dt);
     refreshWorldWindow(false);
@@ -1785,9 +1880,10 @@ function updateGrapplePull(dt) {
 }
 
 function movePlayerWithCollision(dt) {
-  const steps = Math.max(1, Math.ceil(player.velocity.length() * dt / 0.42));
+  const steps = Math.max(1, Math.ceil(player.velocity.length() * dt / 0.28));
   const stepDt = dt / steps;
   for (let i = 0; i < steps; i += 1) movePlayerCollisionStep(stepDt);
+  resolvePlayerStuck(dt);
 }
 
 function movePlayerCollisionStep(dt) {
@@ -1821,6 +1917,55 @@ function movePlayerCollisionStep(dt) {
     player.position.y = groundY;
     player.velocity.y = 0;
   }
+}
+
+function resolvePlayerStuck(dt) {
+  const colliding = bodyCollides(player.position.x, player.position.y, player.position.z, PLAYER_RADIUS, PLAYER_HEIGHT);
+  if (!colliding) {
+    player.stuckTimer = 0;
+    if (player.grounded || player.velocity.lengthSq() < 0.15) player.lastSafePosition.copy(player.position);
+    return;
+  }
+
+  player.stuckTimer += dt;
+  const escape = findNearestPlayerEscape();
+  if (escape) {
+    player.position.copy(escape);
+    player.velocity.multiplyScalar(0.25);
+    player.stuckTimer = 0;
+    player.lastSafePosition.copy(escape);
+    return;
+  }
+
+  if (player.stuckTimer > 0.22) {
+    const fallback = findSafePlayerPosition(player.lastSafePosition.x, player.lastSafePosition.z, 10);
+    if (fallback) {
+      player.position.copy(fallback);
+      player.velocity.set(0, 0, 0);
+      player.lastSafePosition.copy(fallback);
+    } else {
+      placePlayerSafely(0, 0, 14);
+    }
+    player.stuckTimer = 0;
+    announce("已自动脱离卡墙位置");
+  }
+}
+
+function findNearestPlayerEscape() {
+  const baseY = player.position.y;
+  const directions = 16;
+  for (let lift = 0; lift <= 1.2; lift += 0.3) {
+    for (let radius = 0.18; radius <= 1.8; radius += 0.18) {
+      for (let i = 0; i < directions; i += 1) {
+        const angle = (i / directions) * Math.PI * 2;
+        const x = player.position.x + Math.cos(angle) * radius;
+        const z = player.position.z + Math.sin(angle) * radius;
+        const y = Math.max(getGroundY(x, z) + 0.03, baseY + lift);
+        if (!bodyCollides(x, y, z, PLAYER_RADIUS, PLAYER_HEIGHT)) return new THREE.Vector3(x, y, z);
+      }
+    }
+  }
+  return null;
 }
 
 function bodyCollides(x, y, z, radius = 0.36, height = PLAYER_HEIGHT) {
@@ -2363,7 +2508,7 @@ function updateVolcanoes(dt) {
       if (state.lives <= 0) {
         state.lives = PLAYER_MAX_LIVES;
         state.shields = PLAYER_MAX_SHIELDS;
-        player.position.set(0, highestBlockY(0, 0) + 0.05, 0);
+        placePlayerSafely(0, 0, 14);
         state.lavaBurn = 0;
         announce("被熔岩击倒，已在基地复活");
       }
@@ -2486,6 +2631,7 @@ function damageEnemy(enemy, amount, label) {
   if (enemy.hp <= 0) {
     enemy.defeated = true;
     scene.remove(enemy.group);
+    state.kills += 1;
     state.stars += isTitanType(enemy.type) ? Math.ceil(enemy.maxHp * 1.4) : enemy.type.includes("Boss") ? 500 : enemy.type === "turret" ? 30 : 20;
     if (enemy.type === "zombieBoss") summonPack(enemy.position, "zombie");
     if (enemy.type === "rabbitBoss") summonPack(enemy.position, "racketMonster");
@@ -2515,7 +2661,7 @@ function hurtPlayer(amount, source) {
   if (state.lives <= 0) {
     state.lives = PLAYER_MAX_LIVES;
     state.shields = PLAYER_MAX_SHIELDS;
-    player.position.set(0, highestBlockY(0, 0) + 0.05, 0);
+    placePlayerSafely(0, 0, 14);
     announce("已在基地复活");
   }
 }
@@ -2544,12 +2690,13 @@ function placeSelectedBlock() {
   const x = Math.round(pos.x);
   const y = Math.round(pos.y - 0.5);
   const z = Math.round(pos.z);
-  if (!hasCreativeBuildPower() && blockOverlapsPlayer(x, y, z)) {
+  if (blockOverlapsPlayer(x, y, z)) {
     announce("不能把方块放进身体里");
     return;
   }
   if (addBlock(x, y, z, slot.id, true, false, true)) {
     if (!hasCreativeBuildPower()) state.inventory[slot.id] -= 1;
+    state.blocksPlaced += 1;
     announce(`${BLOCKS[slot.id].name}已放置`);
   }
 }
@@ -2600,8 +2747,22 @@ function updateCamera() {
     4.3 + Math.sin(-state.pitch) * 2.4,
     -Math.cos(state.yaw) * 7,
   );
-  camera.position.copy(player.position).add(cameraOffset);
-  camera.lookAt(player.position.x, player.position.y + 1.25, player.position.z);
+  const focus = player.position.clone().add(new THREE.Vector3(0, 1.25, 0));
+  const desired = player.position.clone().add(cameraOffset);
+  const toCamera = desired.clone().sub(focus);
+  const distance = toCamera.length();
+  const direction = toCamera.normalize();
+  const blockers = [...blockMeshes.children, ...grappleSurfaceObjects.filter((object) => object.visible)];
+  raycaster.set(focus, direction);
+  raycaster.far = distance;
+  const hit = raycaster.intersectObjects(blockers, false).find((entry) => entry.distance > 0.65);
+  raycaster.far = Infinity;
+  if (hit) {
+    camera.position.copy(focus).addScaledVector(direction, Math.max(1.8, hit.distance - 0.45));
+  } else {
+    camera.position.copy(desired);
+  }
+  camera.lookAt(focus);
 }
 
 function render() {
@@ -2746,6 +2907,7 @@ function updateUI() {
     statusValue.textContent = player.grappleHook ? "钩爪飞行" : player.grappleTarget ? "牵引" : player.grounded ? "落地" : "空中";
   }
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
+  if (objectiveValue) objectiveValue.textContent = getCurrentObjective();
   weaponValue.textContent = state.odmEquipped
     ? "赤风立体机动"
     : state.weaponMode === "pistol"
@@ -2773,6 +2935,17 @@ function announce(message) {
   state.messageTimer = 1.8;
 }
 
+function getCurrentObjective() {
+  const activeBoss = getActiveBoss();
+  const remainingTitans = enemies.filter((enemy) => !enemy.defeated && isTitanType(enemy.type)).length;
+  if (state.blocksMined < 8) return `采集方块 ${state.blocksMined}/8`;
+  if (state.blocksPlaced < 10) return `建造据点 ${state.blocksPlaced}/10`;
+  if (state.kills < 8) return `清理怪物 ${state.kills}/8`;
+  if (activeBoss) return `Boss ${Math.ceil((activeBoss.hp / activeBoss.maxHp) * 100)}%`;
+  if (remainingTitans > 0) return `巨人后颈 ${remainingTitans}`;
+  return `探索火山 ${volcanoes.length}座`;
+}
+
 function saveGame(showMessage) {
   const placedBlocks = [];
   for (const mesh of blocks.values()) {
@@ -2798,6 +2971,10 @@ function saveGame(showMessage) {
     ownedSkins: state.ownedSkins,
     ownedRackets: state.ownedRackets,
     ownedAbilities: state.ownedAbilities,
+    blocksMined: state.blocksMined,
+    blocksPlaced: state.blocksPlaced,
+    kills: state.kills,
+    playTime: state.playTime,
     player: player.position.toArray(),
     blocks: placedBlocks,
   };
@@ -2831,6 +3008,10 @@ function loadGame() {
       ownedSkins: { bear: true, ...(save.ownedSkins || {}) },
       ownedRackets: { starter: true, ...(save.ownedRackets || {}) },
       ownedAbilities: { pigCompanion: true, odmGear: true, ...(save.ownedAbilities || {}) },
+      blocksMined: save.blocksMined || 0,
+      blocksPlaced: save.blocksPlaced || 0,
+      kills: save.kills || 0,
+      playTime: save.playTime || 0,
     });
     if (Array.isArray(save.player)) player.position.fromArray(save.player);
     if (Array.isArray(save.blocks)) {
@@ -2838,6 +3019,7 @@ function loadGame() {
         addBlock(x, y, z, type, false, false, true);
       }
     }
+    placePlayerSafely(player.position.x, player.position.z, 14);
     rebuildPlayerModel();
     player.group.visible = state.cameraMode !== "first";
     announce("已读取上次 3D 生存世界");
