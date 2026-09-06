@@ -1,4 +1,4 @@
-import * as THREE from "./vendor-three.mjs?v=20260906-hotfix1";
+import * as THREE from "./vendor-three.mjs?v=20260906-hotfix2";
 
 const canvas = document.getElementById("gameCanvas");
 const minimapCanvas = document.getElementById("minimapCanvas");
@@ -11,6 +11,7 @@ const targetValue = document.getElementById("targetValue");
 const fpsValue = document.getElementById("fpsValue");
 const statusValue = document.getElementById("statusValue");
 const objectiveValue = document.getElementById("objectiveValue");
+const buildValue = document.getElementById("buildValue");
 const weaponValue = document.getElementById("weaponValue");
 const cameraValue = document.getElementById("cameraValue");
 const bossValue = document.getElementById("bossValue");
@@ -2910,6 +2911,7 @@ function updateUI() {
   }
   modeButton.textContent = state.mode === "creative" ? "创造" : "生存";
   if (objectiveValue) objectiveValue.textContent = getCurrentObjective();
+  if (buildValue) buildValue.textContent = (window.__JIUXIONG_BUILD__ || "dev").replace("20260906-", "");
   weaponValue.textContent = state.odmEquipped
     ? "赤风立体机动"
     : state.weaponMode === "pistol"
